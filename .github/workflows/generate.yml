@@ -46,8 +46,8 @@ jobs:
         git diff --quiet && git diff --staged --quiet || git commit -m "🎬 Novo vídeo gerado - $(date +'%Y-%m-%d')"
         git push
     
-    - name: Upload vídeo como artefato (backup)
-      uses: actions/upload-artifact@v3
+   - name: Upload vídeo como artefato (backup)
+      uses: actions/upload-artifact@v4
       with:
         name: video-${{ github.run_number }}
         path: videos/*.mp4
