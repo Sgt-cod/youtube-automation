@@ -1,0 +1,62 @@
+{
+  "canal": {
+    "nome": "Fatos Incríveis",
+    "descricao": "Canal automático de curiosidades e fatos fascinantes"
+  },
+  
+  "video": {
+    "duracao_min": 8,
+    "duracao_max": 12,
+    "resolucao": "1920x1080",
+    "fps": 24
+  },
+  
+  "temas": [
+    "curiosidades sobre o espaço e astronomia",
+    "fatos incríveis sobre animais",
+    "mistérios da história antiga",
+    "tecnologias futuristas",
+    "curiosidades sobre o corpo humano",
+    "fenômenos naturais inexplicáveis",
+    "civilizações perdidas",
+    "descobertas científicas recentes",
+    "curiosidades sobre países",
+    "invenções que mudaram o mundo",
+    "recordes mundiais impressionantes",
+    "lugares mais extremos da Terra",
+    "curiosidades sobre o oceano",
+    "fatos sobre a mente humana",
+    "histórias bizarras da ciência"
+  ],
+  
+  "palavras_chave_imagens": [
+    "space",
+    "nature",
+    "science",
+    "technology",
+    "history",
+    "ocean",
+    "animals",
+    "landscape",
+    "discovery",
+    "exploration"
+  ],
+  
+  "automacao": {
+    "horario_publicacao": "10:00",
+    "frequencia": "diaria",
+    "dias_ativos": [1, 2, 3, 4, 5, 6, 7]
+  },
+  
+  "seo": {
+    "hashtags_padrao": [
+      "#fatoscuriosos",
+      "#curiosidades",
+      "#conhecimento",
+      "#educacao",
+      "#ciencia"
+    ],
+    "categoria_youtube": "27",
+    "idioma": "pt-BR"
+  }
+}
