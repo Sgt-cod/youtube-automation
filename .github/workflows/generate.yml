@@ -2,9 +2,8 @@ name: Gerar e Publicar Vídeo
 
 on:
   schedule:
-    # Roda todo dia às 10h UTC (7h Brasília)
     - cron: '0 10 * * *'
-  workflow_dispatch: # Permite rodar manualmente
+  workflow_dispatch:
 
 jobs:
   gerar-video:
@@ -46,7 +45,7 @@ jobs:
         git diff --quiet && git diff --staged --quiet || git commit -m "🎬 Novo vídeo gerado - $(date +'%Y-%m-%d')"
         git push
     
-   - name: Upload vídeo como artefato (backup)
+    - name: Upload vídeo como artefato
       uses: actions/upload-artifact@v4
       with:
         name: video-${{ github.run_number }}
