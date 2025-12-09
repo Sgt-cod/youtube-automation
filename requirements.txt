@@ -1,0 +1,7 @@
+gTTS==2.5.0
+moviepy==1.0.3
+google-generativeai==0.3.2
+google-api-python-client==2.108.0
+google-auth==2.25.2
+requests==2.31.0
+Pillow==10.1.0
