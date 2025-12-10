@@ -8,10 +8,8 @@
     "duracao_min": 8,
     "duracao_max": 12,
     "resolucao": "1920x1080",
-    "fps": 24
-  },
-  
-  "temas": [
+    "fps": 24,
+    "temas": [
     "curiosidades sobre o espaço e astronomia",
     "fatos incríveis sobre animais",
     "mistérios da história antiga",
@@ -28,6 +26,9 @@
     "fatos sobre a mente humana",
     "histórias bizarras da ciência"
   ],
+  },
+  
+ 
   
   "palavras_chave_imagens": [
     "space",
