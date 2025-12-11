@@ -62,20 +62,40 @@ def gerar_titulo_descricao(roteiro):
     
     Roteiro: {roteiro[:500]}...
     
-    Retorne no formato JSON:
-    {{
-        "titulo": "...",
-        "descricao": "...",
-        "tags": ["tag1", "tag2", ...]
-    }}
+    IMPORTANTE: Retorne APENAS um objeto JSON válido, sem nenhum texto antes ou depois.
+    Formato exato:
+    {{"titulo": "seu titulo aqui", "descricao": "sua descricao aqui", "tags": ["tag1", "tag2", "tag3"]}}
     """
     
     response = model.generate_content(prompt)
-    # Extrair JSON da resposta
-    texto = response.text
+    texto = response.text.strip()
+    
+    # Remover markdown se existir
+    texto = texto.replace('```json', '').replace('```', '').strip()
+    
+    # Encontrar o JSON no texto
     inicio = texto.find('{')
     fim = texto.rfind('}') + 1
-    return json.loads(texto[inicio:fim])
+    
+    if inicio == -1 or fim == 0:
+        # Se não encontrar JSON, criar um padrão
+        return {
+            "titulo": "Fatos Incríveis que Você Precisa Conhecer!",
+            "descricao": f"Neste vídeo exploramos curiosidades fascinantes. Inscreva-se para mais conteúdo! #curiosidades #fatos #conhecimento",
+            "tags": ["curiosidades", "fatos", "conhecimento", "educacao", "ciencia"]
+        }
+    
+    json_str = texto[inicio:fim]
+    
+    try:
+        return json.loads(json_str)
+    except:
+        # Fallback se ainda der erro
+        return {
+            "titulo": "Fatos Incríveis que Você Precisa Conhecer!",
+            "descricao": f"Neste vídeo exploramos curiosidades fascinantes. Inscreva-se para mais conteúdo! #curiosidades #fatos #conhecimento",
+            "tags": ["curiosidades", "fatos", "conhecimento", "educacao", "ciencia"]
+        }
 
 def criar_audio(texto, output_file):
     """Converte texto em áudio usando Google TTS"""
