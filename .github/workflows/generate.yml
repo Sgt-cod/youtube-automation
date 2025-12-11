@@ -36,7 +36,7 @@ jobs:
         pip install google-api-python-client
         pip install google-auth
         pip install requests
-        pip install pillow
+        pip install pillow==9.5.0
     
     - name: Gerar vídeo
       env:
