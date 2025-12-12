@@ -7,7 +7,6 @@ from datetime import datetime
 import requests
 import feedparser
 import edge_tts
-import azure.cognitiveservices.speech as speechsdk
 from moviepy.editor import *
 from google import generativeai as genai
 from google.oauth2.credentials import Credentials
