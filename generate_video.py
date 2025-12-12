@@ -4,6 +4,7 @@ import random
 import re
 import asyncio
 from datetime import datetime
+import time
 import requests
 import feedparser
 import edge_tts
@@ -134,23 +135,42 @@ def gerar_roteiro(duracao_alvo, noticia=None):
 
 # ========== VOZ COM EDGE TTS ==========
 
-def criar_audio(texto, output_file):
-    """Wrapper síncrono para criar áudio com fallback"""
-    try:
-        # Tentar Edge TTS
-        asyncio.run(criar_audio_async(texto, output_file))
-        print("✅ Áudio criado com Edge TTS")
-    except Exception as e:
-        print(f"⚠️ Edge TTS falhou: {e}")
-        print("🔄 Usando gTTS como backup...")
-        
-        # Fallback para gTTS
-        from gtts import gTTS
-        tts = gTTS(text=texto, lang='pt-br', slow=False)
-        tts.save(output_file)
-        print("✅ Áudio criado com gTTS")
+
+
+async def criar_audio_async(texto, output_file):
+    """Cria áudio com Edge TTS com tratamento robusto"""
+    voz = config.get('voz', 'pt-BR-FranciscaNeural')
     
-    return output_file
+    for tentativa in range(3):
+        try:
+            # Aumentar timeout
+            communicate = edge_tts.Communicate(
+                texto,
+                voz,
+                rate="+20%",
+                pitch="+0Hz"
+            )
+            
+            # Salvar com timeout maior
+            await asyncio.wait_for(
+                communicate.save(output_file),
+                timeout=120  # 2 minutos de timeout
+            )
+            
+            print(f"✅ Edge TTS: sucesso na tentativa {tentativa + 1}")
+            return
+            
+        except asyncio.TimeoutError:
+            print(f"⏱️ Timeout na tentativa {tentativa + 1}")
+            if tentativa < 2:
+                await asyncio.sleep(10)
+        except Exception as e:
+            print(f"⚠️ Erro na tentativa {tentativa + 1}: {e}")
+            if tentativa < 2:
+                await asyncio.sleep(10)
+    
+    # Se chegou aqui, falhou 3 vezes
+    raise Exception("Edge TTS falhou após 3 tentativas")
 
 # ========== BUSCA DE MÍDIAS ==========
 
