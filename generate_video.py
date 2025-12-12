@@ -3,8 +3,8 @@ import json
 import random
 import re
 import asyncio
-from datetime import datetime
 import time
+from datetime import datetime
 import requests
 import feedparser
 import edge_tts
@@ -19,7 +19,7 @@ from PIL import Image, ImageDraw, ImageFont
 CONFIG_FILE = 'config.json'
 VIDEOS_DIR = 'videos'
 ASSETS_DIR = 'assets'
-VIDEO_TYPE = os.environ.get('VIDEO_TYPE', 'short')  # short ou long
+VIDEO_TYPE = os.environ.get('VIDEO_TYPE', 'short')
 
 # APIs
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
@@ -28,7 +28,7 @@ YOUTUBE_CREDENTIALS = os.environ.get('YOUTUBE_CREDENTIALS')
 
 # Configurar Gemini
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-1.0-pro')
 
 # Carregar configurações
 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
@@ -38,13 +38,13 @@ with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
 
 def buscar_noticias():
     """Busca notícias via RSS"""
-    if config['tipo'] != 'noticias':
+    if config.get('tipo') != 'noticias':
         return None
     
     feeds = config.get('rss_feeds', [])
     todas_noticias = []
     
-    for feed_url in feeds[:3]:  # Limitar a 3 feeds para não demorar
+    for feed_url in feeds[:3]:
         try:
             feed = feedparser.parse(feed_url)
             for entry in feed.entries[:3]:
@@ -65,8 +65,8 @@ def gerar_roteiro(duracao_alvo, noticia=None):
         palavras_alvo = 120
         tempo = '30-60 segundos'
     else:
-        palavras_alvo = config['duracao_minutos'] * 150
-        tempo = f"{config['duracao_minutos']} minutos"
+        palavras_alvo = config.get('duracao_minutos', 10) * 150
+        tempo = f"{config.get('duracao_minutos', 10)} minutos"
     
     if noticia:
         prompt = f"""
@@ -98,7 +98,7 @@ def gerar_roteiro(duracao_alvo, noticia=None):
             - Comece com gancho: "Você sabia que..."
             - 1 curiosidade completa e fascinante
             - Tom empolgante
-            - Finalize com: "Incrível, né? Inscreva-se!"
+            - Finalize com: "Incrível, né?"
             - Apenas texto puro, SEM símbolos, asteriscos, hífens
             - Use apenas pontos e vírgulas
             
@@ -114,7 +114,7 @@ def gerar_roteiro(duracao_alvo, noticia=None):
             - 10-15 curiosidades fascinantes
             - Tom envolvente e natural
             - Transições suaves entre tópicos
-            - Finalize com: "E você, qual curiosidade mais te surpreendeu?"
+            - Finalize com: "Qual curiosidade mais te surpreendeu?"
             - Apenas texto puro, SEM formatação, asteriscos, hífens
             - Use apenas pontos e vírgulas
             
@@ -124,7 +124,7 @@ def gerar_roteiro(duracao_alvo, noticia=None):
     response = model.generate_content(prompt)
     texto = response.text
     
-    # Limpar qualquer formatação que escape
+    # Limpar formatação
     texto = re.sub(r'\*+', '', texto)
     texto = re.sub(r'#+\s', '', texto)
     texto = re.sub(r'^-\s', '', texto, flags=re.MULTILINE)
@@ -135,15 +135,12 @@ def gerar_roteiro(duracao_alvo, noticia=None):
 
 # ========== VOZ COM EDGE TTS ==========
 
-
-
 async def criar_audio_async(texto, output_file):
-    """Cria áudio com Edge TTS com tratamento robusto"""
+    """Cria áudio com Edge TTS com retry"""
     voz = config.get('voz', 'pt-BR-FranciscaNeural')
     
     for tentativa in range(3):
         try:
-            # Aumentar timeout
             communicate = edge_tts.Communicate(
                 texto,
                 voz,
@@ -151,10 +148,9 @@ async def criar_audio_async(texto, output_file):
                 pitch="+0Hz"
             )
             
-            # Salvar com timeout maior
             await asyncio.wait_for(
                 communicate.save(output_file),
-                timeout=120  # 2 minutos de timeout
+                timeout=120
             )
             
             print(f"✅ Edge TTS: sucesso na tentativa {tentativa + 1}")
@@ -169,32 +165,46 @@ async def criar_audio_async(texto, output_file):
             if tentativa < 2:
                 await asyncio.sleep(10)
     
-    # Se chegou aqui, falhou 3 vezes
     raise Exception("Edge TTS falhou após 3 tentativas")
+
+def criar_audio(texto, output_file):
+    """Wrapper síncrono com fallback para gTTS"""
+    try:
+        asyncio.run(criar_audio_async(texto, output_file))
+        print("✅ Áudio criado com Edge TTS")
+    except Exception as e:
+        print(f"⚠️ Edge TTS falhou: {e}")
+        print("🔄 Usando gTTS como backup...")
+        
+        from gtts import gTTS
+        tts = gTTS(text=texto, lang='pt-br', slow=False)
+        tts.save(output_file)
+        print("✅ Áudio criado com gTTS")
+    
+    return output_file
 
 # ========== BUSCA DE MÍDIAS ==========
 
 def buscar_midia_pexels(palavras_chave, tipo='video', quantidade=1):
-    """Busca vídeos ou fotos no Pexels com melhor precisão"""
+    """Busca vídeos ou fotos no Pexels com tradução"""
     headers = {'Authorization': PEXELS_API_KEY}
     
-    # Dicionário de traduções para melhor busca
     traducoes = {
-        'tecnologia': 'technology innovation',
-        'tecnologias': 'modern technology',
+        'tecnologia': 'technology innovation digital',
+        'tecnologias': 'modern technology devices',
         'avanço tecnológico': 'future technology innovation',
-        'espaço': 'space cosmos universe',
-        'oceano': 'ocean underwater sea',
-        'animais': 'wild animals wildlife',
+        'espaço': 'space cosmos universe galaxy',
+        'oceano': 'ocean underwater sea marine',
+        'animais': 'wild animals wildlife nature',
         'ciência': 'science laboratory research',
         'história': 'ancient history ruins',
-        'natureza': 'nature landscape beautiful'
+        'natureza': 'nature landscape beautiful',
+        'corpo humano': 'human body anatomy health',
+        'mente': 'brain mind psychology',
+        'invenções': 'inventions innovation technology'
     }
     
-    # Pegar primeira palavra-chave e tentar tradução
     palavra_original = palavras_chave[0] if palavras_chave else 'nature'
-    
-    # Buscar tradução ou usar palavras-chave em inglês
     palavra_busca = traducoes.get(palavra_original.lower(), palavra_original)
     
     print(f"🔍 Buscando: '{palavra_busca}'")
@@ -211,15 +221,13 @@ def buscar_midia_pexels(palavras_chave, tipo='video', quantidade=1):
                 data = response.json()
                 videos = data.get('videos', [])
                 
-                for video in videos[:quantidade]:
+                for video in videos[:quantidade * 2]:
                     for file in video['video_files']:
                         if VIDEO_TYPE == 'short':
-                            # Short: vertical HD (1080x1920)
                             if file.get('width', 0) == 1080 and file.get('height', 0) >= 1920:
                                 midias.append((file['link'], 'video'))
                                 break
                         else:
-                            # Long: horizontal HD (1920x1080)
                             if file.get('width', 0) >= 1920 and file.get('height', 0) == 1080:
                                 midias.append((file['link'], 'video'))
                                 break
@@ -229,7 +237,6 @@ def buscar_midia_pexels(palavras_chave, tipo='video', quantidade=1):
         except Exception as e:
             print(f"⚠️ Erro ao buscar vídeos: {e}")
     
-    # Fallback: buscar fotos de qualidade
     if len(midias) < quantidade:
         orientacao = 'portrait' if VIDEO_TYPE == 'short' else 'landscape'
         url = f'https://api.pexels.com/v1/search?query={palavra_busca}&per_page=30&orientation={orientacao}'
@@ -245,10 +252,9 @@ def buscar_midia_pexels(palavras_chave, tipo='video', quantidade=1):
         except Exception as e:
             print(f"⚠️ Erro ao buscar fotos: {e}")
     
-    # Se ainda não tem mídia suficiente, usar genéricas
     if not midias:
         print("⚠️ Usando busca genérica...")
-        return buscar_midia_pexels(['technology'], tipo, quantidade)
+        midias = [('https://images.pexels.com/photos/531880/pexels-photo-531880.jpeg', 'foto')]
     
     return midias
 
@@ -269,7 +275,7 @@ def criar_video_short(audio_path, midias, output_file, duracao):
     """Cria short vertical (9:16) - 1080x1920"""
     clips = []
     
-    for i, (midia_url, midia_tipo) in enumerate(midias[:5]):  # Max 5 mídias para short
+    for i, (midia_url, midia_tipo) in enumerate(midias[:5]):
         if not midia_url:
             continue
             
@@ -277,61 +283,52 @@ def criar_video_short(audio_path, midias, output_file, duracao):
         
         try:
             if midia_tipo == 'video':
-    video_temp = f'{ASSETS_DIR}/video_{i}.mp4'
-    if baixar_midia(midia_url, video_temp):
-        try:
-            clip = VideoFileClip(video_temp, audio=False)
-            
-            # Calcular crop para 9:16
-            target_ratio = 9/16
-            video_ratio = clip.w / clip.h
-            
-            if video_ratio > target_ratio:
-                # Vídeo muito largo - crop largura
-                new_width = int(clip.h * target_ratio)
-                x_center = clip.w / 2
-                clip = clip.crop(
-                    x_center=x_center,
-                    width=new_width,
-                    height=clip.h
-                )
+                video_temp = f'{ASSETS_DIR}/video_{i}.mp4'
+                if baixar_midia(midia_url, video_temp):
+                    clip = VideoFileClip(video_temp, audio=False)
+                    
+                    target_ratio = 9/16
+                    video_ratio = clip.w / clip.h
+                    
+                    if video_ratio > target_ratio:
+                        new_width = int(clip.h * target_ratio)
+                        x_center = clip.w / 2
+                        clip = clip.crop(x_center=x_center, width=new_width, height=clip.h)
+                    else:
+                        new_height = int(clip.w / target_ratio)
+                        y_center = clip.h / 2
+                        clip = clip.crop(y_center=y_center, width=clip.w, height=new_height)
+                    
+                    clip = clip.resize((1080, 1920))
+                    clip = clip.set_duration(min(duracao_clip, clip.duration))
+                    
+                    if i > 0:
+                        clip = clip.crossfadein(0.3)
+                    
+                    clips.append(clip)
             else:
-                # Vídeo muito alto - crop altura
-                new_height = int(clip.w / target_ratio)
-                y_center = clip.h / 2
-                clip = clip.crop(
-                    y_center=y_center,
-                    width=clip.w,
-                    height=new_height
-                )
-            
-            # Resize para 1080x1920
-            clip = clip.resize((1080, 1920))
-            clip = clip.set_duration(min(duracao_clip, clip.duration))
-            
-            # Adicionar fade
-            if i > 0:
-                clip = clip.crossfadein(0.3)
-            
-            clips.append(clip)
-            
+                foto_temp = f'{ASSETS_DIR}/foto_{i}.jpg'
+                if baixar_midia(midia_url, foto_temp):
+                    clip = ImageClip(foto_temp).set_duration(duracao_clip)
+                    clip = clip.resize(height=1920)
+                    if clip.w > 1080:
+                        clip = clip.crop(x_center=clip.w/2, width=1080, height=1920)
+                    clip = clip.resize(lambda t: 1 + 0.15 * (t / duracao_clip))
+                    clips.append(clip)
         except Exception as e:
-            print(f"⚠️ Erro ao processar vídeo {i}: {e}")
+            print(f"⚠️ Erro ao processar mídia {i}: {e}")
             continue
     
     if not clips:
         print("❌ Nenhuma mídia válida")
         return None
     
-    # Concatenar
     video = concatenate_videoclips(clips, method="compose")
     video = video.set_duration(duracao)
     
-    # Adicionar áudio
     audio = AudioFileClip(audio_path)
     video = video.set_audio(audio)
     
-    # Renderizar
     video.write_videofile(
         output_file,
         fps=30,
@@ -356,14 +353,13 @@ def criar_video_long(audio_path, midias, output_file, duracao):
             if midia_tipo == 'video':
                 video_temp = f'{ASSETS_DIR}/video_{i}.mp4'
                 if baixar_midia(midia_url, video_temp):
-                    clip = VideoFileClip(video_temp)
+                    clip = VideoFileClip(video_temp, audio=False)
                     clip = clip.resize(height=1080)
                     if clip.w < 1920:
                         clip = clip.resize(width=1920)
                     clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=1920, height=1080)
                     clip = clip.set_duration(min(duracao_por_midia, clip.duration))
                     
-                    # Transição
                     if i > 0:
                         clip = clip.crossfadein(0.5)
                     
@@ -376,32 +372,26 @@ def criar_video_long(audio_path, midias, output_file, duracao):
                     if clip.w < 1920:
                         clip = clip.resize(width=1920)
                     clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=1920, height=1080)
-                    
-                    # Ken Burns effect
                     clip = clip.resize(lambda t: 1 + 0.08 * (t / duracao_por_midia))
                     
-                    # Transição
                     if i > 0:
                         clip = clip.crossfadein(0.5)
                     
                     clips.append(clip)
         except Exception as e:
-            print(f"Erro ao processar mídia {i}: {e}")
+            print(f"⚠️ Erro ao processar mídia {i}: {e}")
             continue
     
     if not clips:
         print("❌ Nenhuma mídia válida")
         return None
     
-    # Concatenar
     video = concatenate_videoclips(clips, method="compose")
     video = video.set_duration(duracao)
     
-    # Adicionar áudio
     audio = AudioFileClip(audio_path)
     video = video.set_audio(audio)
     
-    # Renderizar
     video.write_videofile(
         output_file,
         fps=24,
@@ -417,22 +407,16 @@ def criar_video_long(audio_path, midias, output_file, duracao):
 
 def criar_thumbnail(titulo, output_file, tipo='short'):
     """Cria thumbnail"""
-    if tipo == 'short':
-        tamanho = (1080, 1920)
-        font_size = 90
-    else:
-        tamanho = (1280, 720)
-        font_size = 80
+    tamanho = (1080, 1920) if tipo == 'short' else (1280, 720)
+    font_size = 90 if tipo == 'short' else 80
     
     img = Image.new('RGB', tamanho, color=(25, 25, 45))
     draw = ImageDraw.Draw(img)
     
-    # Gradiente
     for i in range(tamanho[1]):
         cor = (25 + i//25, 25 + i//35, 45 + i//20)
         draw.rectangle([(0, i), (tamanho[0], i+1)], fill=cor)
     
-    # Fonte
     try:
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", font_size)
         font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", font_size//2)
@@ -440,11 +424,9 @@ def criar_thumbnail(titulo, output_file, tipo='short'):
         font = ImageFont.load_default()
         font_small = font
     
-    # Texto
     palavras = titulo.split()[:8]
     texto = ' '.join(palavras)
     
-    # Quebrar linhas
     linhas = []
     linha_atual = ""
     for palavra in palavras:
@@ -457,7 +439,6 @@ def criar_thumbnail(titulo, output_file, tipo='short'):
     if linha_atual:
         linhas.append(linha_atual)
     
-    # Desenhar
     y_start = tamanho[1] // 3
     for linha in linhas[:3]:
         bbox = draw.textbbox((0, 0), linha, font=font)
@@ -468,7 +449,6 @@ def criar_thumbnail(titulo, output_file, tipo='short'):
         draw.text((x, y_start), linha, font=font, fill=(255, 255, 255))
         y_start += font_size + 20
     
-    # Emoji
     emoji = "🔥" if tipo == 'short' else "📚"
     bbox = draw.textbbox((0, 0), emoji, font=font_small)
     w = bbox[2] - bbox[0]
@@ -487,12 +467,10 @@ def gerar_titulo_descricao(roteiro, tema):
         titulo += ' #shorts'
     
     descricao = roteiro[:300] + '...' if len(roteiro) > 300 else roteiro
-    descricao += '\n\n'
-    descricao += '🔔 Inscreva-se para mais conteúdo!\n'
-    descricao += f'#{"shorts" if VIDEO_TYPE == "short" else "curiosidades"} '
-    descricao += '#fatos #conhecimento'
+    descricao += '\n\n🔔 Inscreva-se!\n'
+    descricao += f'#{"shorts" if VIDEO_TYPE == "short" else "curiosidades"} #fatos'
     
-    tags = ['curiosidades', 'fatos', 'conhecimento', 'educacao']
+    tags = ['curiosidades', 'fatos', 'conhecimento']
     if VIDEO_TYPE == 'short':
         tags.append('shorts')
     
@@ -534,38 +512,29 @@ def main():
     os.makedirs(VIDEOS_DIR, exist_ok=True)
     os.makedirs(ASSETS_DIR, exist_ok=True)
     
-    # Buscar conteúdo
     noticia = buscar_noticias()
     
-    # Gerar roteiro
     print("✍️ Gerando roteiro...")
     roteiro, tema = gerar_roteiro(VIDEO_TYPE, noticia)
     print(f"📝 Tema: {tema}")
     
-    # Criar áudio
-    print("🎙️ Criando narração com Edge TTS...")
+    print("🎙️ Criando narração...")
     audio_path = f'{ASSETS_DIR}/audio.mp3'
     criar_audio(roteiro, audio_path)
     
-    # Duração
     audio_clip = AudioFileClip(audio_path)
     duracao = audio_clip.duration
     audio_clip.close()
     print(f"⏱️ Duração: {duracao:.1f}s")
     
-    # Buscar mídias
     print("🖼️ Buscando mídias...")
     palavras = config.get('palavras_chave_imagens', [tema.split()[0]])
     
-    if VIDEO_TYPE == 'short':
-        quantidade = 3
-    else:
-        quantidade = max(40, int(duracao / 15))  # 1 mídia a cada 15s
+    quantidade = 3 if VIDEO_TYPE == 'short' else max(40, int(duracao / 15))
     
     midias = buscar_midia_pexels(palavras, tipo='video', quantidade=quantidade)
     print(f"✅ {len(midias)} mídias encontradas")
     
-    # Criar vídeo
     print(f"🎥 Montando {tipo_nome}...")
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     video_path = f'{VIDEOS_DIR}/{VIDEO_TYPE}_{timestamp}.mp4'
@@ -579,21 +548,17 @@ def main():
         print("❌ Erro ao criar vídeo")
         return
     
-    # Criar thumbnail
     print("🖼️ Criando thumbnail...")
     thumbnail_path = f'{VIDEOS_DIR}/thumb_{timestamp}.jpg'
     criar_thumbnail(tema, thumbnail_path, VIDEO_TYPE)
     
-    # Metadados
     titulo, descricao, tags = gerar_titulo_descricao(roteiro, tema)
     
-    # Upload
     print("📤 Fazendo upload no YouTube...")
     video_id = fazer_upload_youtube(video_path, titulo, descricao, tags)
     
     url = f'https://youtube.com/{"shorts" if VIDEO_TYPE == "short" else "watch?v="}{video_id}'
     
-    # Log
     log_entry = {
         'data': datetime.now().isoformat(),
         'tipo': VIDEO_TYPE,
@@ -617,7 +582,6 @@ def main():
     print(f"✅ {tipo_nome} publicado!")
     print(f"🔗 {url}")
     
-    # Limpar
     for file in os.listdir(ASSETS_DIR):
         try:
             os.remove(os.path.join(ASSETS_DIR, file))
