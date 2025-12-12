@@ -7,6 +7,7 @@ from datetime import datetime
 import requests
 import feedparser
 import edge_tts
+import azure.cognitiveservices.speech as speechsdk
 from moviepy.editor import *
 from google import generativeai as genai
 from google.oauth2.credentials import Credentials
@@ -134,33 +135,25 @@ def gerar_roteiro(duracao_alvo, noticia=None):
 
 # ========== VOZ COM EDGE TTS ==========
 
-async def criar_audio_async(texto, output_file):
-    """Cria áudio com Edge TTS (Microsoft) - GRÁTIS e ILIMITADO"""
-    voz = config.get('voz', 'pt-BR-FranciscaNeural')
-    
-    # Tentar 3 vezes
-    for tentativa in range(3):
-        try:
-            communicate = edge_tts.Communicate(
-                texto,
-                voz,
-                rate="+20%",
-                pitch="+0Hz"
-            )
-            
-            await communicate.save(output_file)
-            return  # Sucesso!
-        except Exception as e:
-            print(f"⚠️ Tentativa {tentativa + 1} falhou: {e}")
-            if tentativa < 2:
-                await asyncio.sleep(5)  # Aguardar 5s antes de tentar de novo
-            else:
-                raise  # Na 3ª falha, lançar erro
+def criar_audio_azure(texto, output_file):
+    speech_key = os.environ.get('AZURE_SPEECH_KEY')
+    speech_region = os.environ.get('AZURE_SPEECH_REGION')
+    if not speech_key or not speech_region:
+        raise RuntimeError("Defina AZURE_SPEECH_KEY e AZURE_SPEECH_REGION no ambiente.")
 
-def criar_audio(texto, output_file):
-    """Wrapper síncrono para criar áudio"""
-    asyncio.run(criar_audio_async(texto, output_file))
-    return output_file
+    speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
+    # escolha uma voz pt-BR neural disponível
+    speech_config.speech_synthesis_voice_name = "pt-BR-FranciscaNeural"  
+    audio_config = speechsdk.audio.AudioOutputConfig(filename=output_file)
+
+    synthesizer = speechsdk.SpeechSynthesizer(speech_config=speech_config, audio_config=audio_config)
+    result = synthesizer.speak_text_async(texto).get()
+
+    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+        return output_file
+    else:
+        print("Erro Azure TTS:", result.reason, result.error_details if hasattr(result, 'error_details') else '')
+        raise RuntimeError("Falha ao sintetizar via Azure.")
 
 # ========== BUSCA DE MÍDIAS ==========
 
