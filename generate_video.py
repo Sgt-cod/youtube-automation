@@ -136,17 +136,26 @@ def gerar_roteiro(duracao_alvo, noticia=None):
 
 async def criar_audio_async(texto, output_file):
     """Cria áudio com Edge TTS (Microsoft) - GRÁTIS e ILIMITADO"""
-    voz = config.get('voz', 'pt-BR-FranciscaNeural')  # Feminina
-    # Outras opções: pt-BR-AntonioNeural (masculina)
+    voz = config.get('voz', 'pt-BR-FranciscaNeural')
     
-    communicate = edge_tts.Communicate(
-        texto,
-        voz,
-        rate="+20%",  # 20% mais rápido
-        pitch="+0Hz"
-    )
-    
-    await communicate.save(output_file)
+    # Tentar 3 vezes
+    for tentativa in range(3):
+        try:
+            communicate = edge_tts.Communicate(
+                texto,
+                voz,
+                rate="+20%",
+                pitch="+0Hz"
+            )
+            
+            await communicate.save(output_file)
+            return  # Sucesso!
+        except Exception as e:
+            print(f"⚠️ Tentativa {tentativa + 1} falhou: {e}")
+            if tentativa < 2:
+                await asyncio.sleep(5)  # Aguardar 5s antes de tentar de novo
+            else:
+                raise  # Na 3ª falha, lançar erro
 
 def criar_audio(texto, output_file):
     """Wrapper síncrono para criar áudio"""
