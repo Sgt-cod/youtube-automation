@@ -175,18 +175,38 @@ async def criar_audio_async(texto, output_file):
 # ========== BUSCA DE MÍDIAS ==========
 
 def buscar_midia_pexels(palavras_chave, tipo='video', quantidade=1):
-    """Busca vídeos ou fotos no Pexels"""
+    """Busca vídeos ou fotos no Pexels com melhor precisão"""
     headers = {'Authorization': PEXELS_API_KEY}
-    palavra = random.choice(palavras_chave)
+    
+    # Dicionário de traduções para melhor busca
+    traducoes = {
+        'tecnologia': 'technology innovation',
+        'tecnologias': 'modern technology',
+        'avanço tecnológico': 'future technology innovation',
+        'espaço': 'space cosmos universe',
+        'oceano': 'ocean underwater sea',
+        'animais': 'wild animals wildlife',
+        'ciência': 'science laboratory research',
+        'história': 'ancient history ruins',
+        'natureza': 'nature landscape beautiful'
+    }
+    
+    # Pegar primeira palavra-chave e tentar tradução
+    palavra_original = palavras_chave[0] if palavras_chave else 'nature'
+    
+    # Buscar tradução ou usar palavras-chave em inglês
+    palavra_busca = traducoes.get(palavra_original.lower(), palavra_original)
+    
+    print(f"🔍 Buscando: '{palavra_busca}'")
     
     midias = []
     
     if tipo == 'video':
         orientacao = 'portrait' if VIDEO_TYPE == 'short' else 'landscape'
-        url = f'https://api.pexels.com/videos/search?query={palavra}&per_page=15&orientation={orientacao}'
+        url = f'https://api.pexels.com/videos/search?query={palavra_busca}&per_page=20&orientation={orientacao}'
         
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(url, headers=headers, timeout=15)
             if response.status_code == 200:
                 data = response.json()
                 videos = data.get('videos', [])
@@ -194,35 +214,43 @@ def buscar_midia_pexels(palavras_chave, tipo='video', quantidade=1):
                 for video in videos[:quantidade]:
                     for file in video['video_files']:
                         if VIDEO_TYPE == 'short':
-                            # Short: vertical, HD
-                            if file['height'] >= 1080 and file['width'] < file['height']:
+                            # Short: vertical HD (1080x1920)
+                            if file.get('width', 0) == 1080 and file.get('height', 0) >= 1920:
                                 midias.append((file['link'], 'video'))
                                 break
                         else:
-                            # Long: horizontal, HD
-                            if file['width'] >= 1920 and file['height'] <= 1080:
+                            # Long: horizontal HD (1920x1080)
+                            if file.get('width', 0) >= 1920 and file.get('height', 0) == 1080:
                                 midias.append((file['link'], 'video'))
                                 break
-        except:
-            pass
+                    
+                    if len(midias) >= quantidade:
+                        break
+        except Exception as e:
+            print(f"⚠️ Erro ao buscar vídeos: {e}")
     
-    # Fallback ou complemento com fotos
+    # Fallback: buscar fotos de qualidade
     if len(midias) < quantidade:
         orientacao = 'portrait' if VIDEO_TYPE == 'short' else 'landscape'
-        url = f'https://api.pexels.com/v1/search?query={palavra}&per_page=20&orientation={orientacao}'
+        url = f'https://api.pexels.com/v1/search?query={palavra_busca}&per_page=30&orientation={orientacao}'
         
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(url, headers=headers, timeout=15)
             if response.status_code == 200:
                 data = response.json()
                 fotos = data.get('photos', [])
                 
                 for foto in fotos[:quantidade - len(midias)]:
                     midias.append((foto['src']['large2x'], 'foto'))
-        except:
-            pass
+        except Exception as e:
+            print(f"⚠️ Erro ao buscar fotos: {e}")
     
-    return midias if midias else [(None, None)]
+    # Se ainda não tem mídia suficiente, usar genéricas
+    if not midias:
+        print("⚠️ Usando busca genérica...")
+        return buscar_midia_pexels(['technology'], tipo, quantidade)
+    
+    return midias
 
 def baixar_midia(url, filename):
     """Baixa mídia"""
@@ -249,25 +277,46 @@ def criar_video_short(audio_path, midias, output_file, duracao):
         
         try:
             if midia_tipo == 'video':
-                video_temp = f'{ASSETS_DIR}/video_{i}.mp4'
-                if baixar_midia(midia_url, video_temp):
-                    clip = VideoFileClip(video_temp)
-                    clip = clip.resize(height=1920)
-                    clip = clip.crop(x_center=clip.w/2, width=1080, height=1920)
-                    clip = clip.set_duration(min(duracao_clip, clip.duration))
-                    clips.append(clip)
+    video_temp = f'{ASSETS_DIR}/video_{i}.mp4'
+    if baixar_midia(midia_url, video_temp):
+        try:
+            clip = VideoFileClip(video_temp, audio=False)
+            
+            # Calcular crop para 9:16
+            target_ratio = 9/16
+            video_ratio = clip.w / clip.h
+            
+            if video_ratio > target_ratio:
+                # Vídeo muito largo - crop largura
+                new_width = int(clip.h * target_ratio)
+                x_center = clip.w / 2
+                clip = clip.crop(
+                    x_center=x_center,
+                    width=new_width,
+                    height=clip.h
+                )
             else:
-                foto_temp = f'{ASSETS_DIR}/foto_{i}.jpg'
-                if baixar_midia(midia_url, foto_temp):
-                    clip = ImageClip(foto_temp).set_duration(duracao_clip)
-                    clip = clip.resize(height=1920)
-                    if clip.w > 1080:
-                        clip = clip.crop(x_center=clip.w/2, width=1080, height=1920)
-                    # Zoom suave
-                    clip = clip.resize(lambda t: 1 + 0.15 * (t / duracao_clip))
-                    clips.append(clip)
+                # Vídeo muito alto - crop altura
+                new_height = int(clip.w / target_ratio)
+                y_center = clip.h / 2
+                clip = clip.crop(
+                    y_center=y_center,
+                    width=clip.w,
+                    height=new_height
+                )
+            
+            # Resize para 1080x1920
+            clip = clip.resize((1080, 1920))
+            clip = clip.set_duration(min(duracao_clip, clip.duration))
+            
+            # Adicionar fade
+            if i > 0:
+                clip = clip.crossfadein(0.3)
+            
+            clips.append(clip)
+            
         except Exception as e:
-            print(f"Erro ao processar mídia {i}: {e}")
+            print(f"⚠️ Erro ao processar vídeo {i}: {e}")
             continue
     
     if not clips:
