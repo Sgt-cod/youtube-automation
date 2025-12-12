@@ -1,6 +1,8 @@
 {
-  "duracao_min": 8,
-  "duracao_max": 12,
+  "tipo": "curiosidades",
+  "duracao_minutos": 10,
+  "voz": "pt-BR-FranciscaNeural",
+  
   "temas": [
     "curiosidades sobre o espaço e astronomia",
     "fatos incríveis sobre animais",
@@ -18,16 +20,17 @@
     "fatos sobre a mente humana",
     "histórias bizarras da ciência"
   ],
+  
   "palavras_chave_imagens": [
-    "space",
-    "nature",
-    "science",
-    "technology",
-    "history",
-    "ocean",
-    "animals",
-    "landscape",
-    "discovery",
-    "exploration"
+    "space cosmos",
+    "wild animals",
+    "ancient history",
+    "future technology",
+    "science laboratory",
+    "ocean deep sea",
+    "nature landscape",
+    "discovery exploration",
+    "astronomy stars",
+    "wildlife nature"
   ]
 }
