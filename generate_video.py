@@ -5,7 +5,10 @@ import re
 import asyncio
 from datetime import datetime
 import requests
-import feedparser
+try:
+    import feedparser
+except ImportError:
+    feedparser = None
 import edge_tts
 from moviepy.editor import *
 from google import generativeai as genai
