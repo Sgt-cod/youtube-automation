@@ -4,10 +4,7 @@ import random
 import re
 import asyncio
 from datetime import datetime
-try:
-    import feedparser
-except ImportError:
-    feedparser = None
+import requests
 import feedparser
 import edge_tts
 from moviepy.editor import *
@@ -34,9 +31,6 @@ with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
 
 def buscar_noticias():
     if config.get('tipo') != 'noticias':
-        return None
-        if feedparser is None:
-        print("⚠️ feedparser não instalado")
         return None
     feeds = config.get('rss_feeds', [])
     todas_noticias = []
