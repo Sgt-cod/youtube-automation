@@ -1,49 +1,28 @@
 {
   "tipo": "curiosidades",
+  "canal": {
+    "nome": "Fatos Incríveis",
+    "descricao": "Curiosidades fascinantes todos os dias"
+  },
+  
   "duracao_minutos": 10,
   "voz": "pt-BR-FranciscaNeural",
   
   "temas": [
     "curiosidades sobre o espaço e astronomia",
-    "fatos incríveis sobre animais",
+    "fatos incríveis sobre animais selvagens",
     "mistérios da história antiga",
     "tecnologias futuristas",
     "curiosidades sobre o corpo humano",
     "fenômenos naturais inexplicáveis",
     "civilizações perdidas",
     "descobertas científicas recentes",
-    "curiosidades sobre países",
+    "curiosidades sobre países exóticos",
     "invenções que mudaram o mundo",
     "recordes mundiais impressionantes",
     "lugares mais extremos da Terra",
-    "curiosidades sobre o oceano",
+    "curiosidades sobre o oceano profundo",
     "fatos sobre a mente humana",
-    "histórias bizarras da ciência",
-    "avanços tecnológicos recentes",
-    "inteligência artificial e robótica",
-    "descobertas científicas surpreendentes"
-  ],
-  
-  "palavras_chave_imagens": [
-    "space cosmos",
-    "wild animals",
-    "ancient history",
-    "future technology",
-    "science laboratory",
-    "ocean deep sea",
-    "nature landscape",
-    "discovery exploration",
-    "astronomy stars",
-    "wildlife nature",
-    "space cosmos galaxy",
-    "wild animals nature",
-    "future technology innovation",
-    "artificial intelligence robot",
-    "science laboratory research",
-    "ocean underwater marine",
-    "nature landscape mountain",
-    "astronomy stars nebula",
-    "wildlife safari animals",
-    "modern technology digital"
+    "histórias bizarras da ciência"
   ]
 }
