@@ -28,6 +28,8 @@ jobs:
     - name: Instalar dependências Python
       run: |
         pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install feedparser==6.0.12
         pip install gTTS
         pip install imageio==2.25.1
         pip install imageio-ffmpeg
@@ -37,6 +39,7 @@ jobs:
         pip install google-auth
         pip install requests
         pip install pillow==9.5.0
+        
     
     - name: Gerar vídeo
       env:
