@@ -643,4 +643,37 @@ def main():
     titulo = titulo_video[:60] if len(titulo_video) <= 60 else titulo_video[:57] + '...'
     
     if VIDEO_TYPE == 'short':
-        titulo += '
+        titulo += ' #shorts'
+    descricao = roteiro[:300] + '...\n\n🔔 Inscreva-se!\n#' + ('shorts' if VIDEO_TYPE == 'short' else 'curiosidades')
+    tags = ['curiosidades', 'fatos'] if not noticia else ['noticias', 'informacao']
+    if VIDEO_TYPE == 'short':
+        tags.append('shorts')
+    print("📤 Upload...")
+    video_id = fazer_upload_youtube(video_path, titulo, descricao, tags)
+    url = f'https://youtube.com/{"shorts" if VIDEO_TYPE == "short" else "watch?v="}{video_id}'
+    log_entry = {
+        'data': datetime.now().isoformat(),
+        'tipo': VIDEO_TYPE,
+        'tema': titulo_video,
+        'titulo': titulo,
+        'duracao': duracao,
+        'video_id': video_id,
+        'url': url
+    }
+    log_file = 'videos_gerados.json'
+    logs = []
+    if os.path.exists(log_file):
+        with open(log_file, 'r', encoding='utf-8') as f:
+            logs = json.load(f)
+    logs.append(log_entry)
+    with open(log_file, 'w', encoding='utf-8') as f:
+        json.dump(logs, f, indent=2, ensure_ascii=False)
+    print(f"✅ Publicado!\n🔗 {url}")
+    for file in os.listdir(ASSETS_DIR):
+        try:
+            os.remove(os.path.join(ASSETS_DIR, file))
+        except:
+            pass
+
+if __name__ == '__main__':
+    main()
