@@ -7,6 +7,8 @@ from datetime import datetime
 import requests
 import feedparser
 import edge_tts
+from gradio_client import Client, handle_file
+import shutil # Para mover arquivos
 from moviepy.editor import *
 from google import generativeai as genai
 from google.oauth2.credentials import Credentials
@@ -22,6 +24,7 @@ VIDEO_TYPE = os.environ.get('VIDEO_TYPE', 'short')
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 PEXELS_API_KEY = os.environ.get('PEXELS_API_KEY')
 YOUTUBE_CREDENTIALS = os.environ.get('YOUTUBE_CREDENTIALS')
+HF_TOKEN = os.environ.get('HF_TOKEN')
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel('gemini-2.5-flash')
@@ -142,45 +145,37 @@ Escreva APENAS o roteiro de narração."""
     
     return texto
 
-async def criar_audio_async(texto, output_file):
-    voz = config.get('voz', 'pt-BR-FranciscaNeural')
-    
-    for tentativa in range(3):
-        try:
-            communicate = edge_tts.Communicate(texto, voz, rate="+0%", pitch="+0Hz")
-            await asyncio.wait_for(communicate.save(output_file), timeout=120)
-            print(f"✅ Edge TTS (tent {tentativa + 1})")
-            return
-        except asyncio.TimeoutError:
-            print(f"⏱️ Timeout {tentativa + 1}")
-            if tentativa < 2:
-                await asyncio.sleep(10)
-        except Exception as e:
-            print(f"⚠️ Erro {tentativa + 1}: {e}")
-            if tentativa < 2:
-                await asyncio.sleep(10)
-    
-    raise Exception("Edge TTS falhou")
-
 def criar_audio(texto, output_file):
-    print("🎙️ Criando narração...")
+    print("🎙️ Criando narração realista (Fish Speech)...")
+    HF_TOKEN = os.environ.get('HF_TOKEN')
+    
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(criar_audio_async(texto, output_file))
-        loop.close()
+        # Conecta ao servidor do Fish Speech no Hugging Face
+        client = Client("fishaudio/fish-speech-1", hf_token=HF_TOKEN)
         
-        if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-            print(f"✅ Edge TTS: {os.path.getsize(output_file)} bytes")
-            return output_file
-    except Exception as e:
-        print(f"❌ Edge TTS: {e}")
-        print("🔄 Fallback gTTS...")
-        from gtts import gTTS
-        tts = gTTS(text=texto, lang='pt-br', slow=False)
-        tts.save(output_file)
-        print("⚠️ gTTS")
+        # O arquivo 'minha_voz.mp3' deve estar na pasta 'assets' 
+        voz_referencia = os.path.join(ASSETS_DIR, 'minha_voz.mp3')
+        
+        result = client.predict(
+            task="text_to_speech",
+            text=texto,
+            enable_reference_audio=True,
+            reference_audio=handle_file(voz_referencia),
+            streaming=False,
+            api_name="/process"
+        )
+        
+        # O Gradio retorna o caminho de um arquivo temporário
+        temp_path = result[0] if isinstance(result, (tuple, list)) else result
+        shutil.move(temp_path, output_file)
+        
+        print(f"✅ Áudio clonado com sucesso!")
         return output_file
+
+    except Exception as e:
+        print(f"❌ Erro Fish Speech: {e}")
+        # Opcional: Você pode manter o edge-tts aqui como um 'plano B'
+        return None
 
 def extrair_keywords_do_texto(texto):
     prompt = f"""Extraia 3-5 palavras-chave em INGLÊS para buscar imagens/vídeos:
