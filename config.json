@@ -1,12 +1,14 @@
 {
-  "tipo": "curiosidades",
+  "tipo": "motivacional",
   "canal": {
     "nome": "Fatos Incríveis",
-    "descricao": "Curiosidades fascinantes todos os dias"
+    "descricao": "Curiosidades fascinantes todos os dias" [cite: 76]
   },
+  "duracao_minutos": 1,
   
-  "duracao_minutos": 10,
-  "voz": "pt-BR-FranciscaNeural",
+  "tts_provider": "fish_speech",
+  "referencia_voz": "assets/minha_voz.mp3",
+  "voz_fallback": "pt-BR-AntonioNeural",
   
   "temas": [
     "curiosidades sobre o espaço e astronomia",
