@@ -1,3 +1,4 @@
+gradio_client==2.0.1
 edge-tts==7.0.0
 aiohttp==3.9.1
 certifi==2023.11.17
