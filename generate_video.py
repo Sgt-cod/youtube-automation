@@ -146,15 +146,17 @@ Escreva APENAS o roteiro de narração."""
     return texto
 
 def criar_audio(texto, output_file):
-    print("🎙️ Criando narração realista (Fish Speech)...")
     HF_TOKEN = os.environ.get('HF_TOKEN')
     
     try:
-        # Conecta ao servidor do Fish Speech no Hugging Face
-        client = Client("fishaudio/fish-speech-1", hf_token=HF_TOKEN)
+        # Tente conectar sem o token no init primeiro
+        client = Client("fishaudio/fish-speech-1")
         
-        # O arquivo 'minha_voz.mp3' deve estar na pasta 'assets' 
-        voz_referencia = os.path.join(ASSETS_DIR, 'minha_voz.mp3')
+        # Se você tiver o token, faça o login
+        if HF_TOKEN:
+            client.headers.update({"Authorization": f"Bearer {HF_TOKEN}"})
+        
+        voz_ref = config.get('referencia_voz', 'assets/minha_voz.mp3')
         
         result = client.predict(
             task="text_to_speech",
