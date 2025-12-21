@@ -149,44 +149,57 @@ def criar_audio(texto, output_file):
     HF_TOKEN = os.environ.get('HF_TOKEN')
     
     try:
-        # Tente conectar sem o token no init primeiro
-        client = Client("fishaudio/fish-speech-1")
+        print("🎤 Tentando Fish Speech...")
         
-        # Se você tiver o token, faça o login
-        if HF_TOKEN:
-            client.headers.update({"Authorization": f"Bearer {HF_TOKEN}"})
-        
-        # CORREÇÃO: Ler o caminho da voz de referência do config
+        # Verificar se o arquivo de referência existe
         voz_referencia = config.get('referencia_voz', 'assets/minha_voz.mp3')
         
-        # Verificar se o arquivo existe
         if not os.path.exists(voz_referencia):
             print(f"⚠️ Arquivo de referência não encontrado: {voz_referencia}")
-            print("⚠️ Voltando para Edge TTS...")
+            print("⚠️ Criando arquivo de referência vazio...")
+            # Cria diretório se não existir
+            os.makedirs(os.path.dirname(voz_referencia), exist_ok=True)
+            # Baixa um exemplo ou cria um placeholder
+            print("⚠️ Usando Edge TTS...")
             return criar_audio_edge_tts(texto, output_file)
         
+        # Conectar ao Fish Speech
+        client = Client("fishaudio/fish-speech-1")
+        
+        # Fazer a predição com os parâmetros corretos
         result = client.predict(
-            task="text_to_speech",
             text=texto,
             enable_reference_audio=True,
             reference_audio=handle_file(voz_referencia),
-            streaming=False,
-            api_name="/process"
+            reference_text="",  # Opcional: transcrição do áudio de referência
+            max_new_tokens=1024,
+            chunk_length=200,
+            top_p=0.7,
+            repetition_penalty=1.2,
+            temperature=0.7,
+            api_name="/inference"  # ← MUDANÇA AQUI
         )
         
-        # O Gradio retorna o caminho de um arquivo temporário
-        temp_path = result[0] if isinstance(result, (tuple, list)) else result
-        shutil.move(temp_path, output_file)
-        
-        print(f"✅ Áudio clonado com sucesso!")
-        return output_file
-        
+        # Processar o resultado
+        if result and len(result) > 0:
+            audio_path = result[0] if isinstance(result, (tuple, list)) else result
+            
+            # Copiar o arquivo
+            if os.path.exists(audio_path):
+                shutil.copy(audio_path, output_file)
+                print(f"✅ Áudio clonado com Fish Speech!")
+                return output_file
+            else:
+                raise Exception("Arquivo de áudio não foi gerado")
+        else:
+            raise Exception("Resultado vazio do Fish Speech")
+            
     except Exception as e:
         print(f"❌ Erro Fish Speech: {e}")
         print("⚠️ Usando Edge TTS como fallback...")
         return criar_audio_edge_tts(texto, output_file)
 
-# Adicione esta função de fallback
+# Função fallback Edge TTS
 async def criar_audio_edge_tts_async(texto, output_file):
     voz = config.get('voz_fallback', 'pt-BR-AntonioNeural')
     communicate = edge_tts.Communicate(texto, voz)
