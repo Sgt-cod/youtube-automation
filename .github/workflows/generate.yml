@@ -46,6 +46,7 @@ jobs:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
         YOUTUBE_CREDENTIALS: ${{ secrets.YOUTUBE_CREDENTIALS }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
         VIDEO_TYPE: long
       run: python generate_video.py
     
