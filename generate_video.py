@@ -146,35 +146,42 @@ Escreva APENAS o roteiro de narração."""
     return texto
 
 def criar_audio(texto, output_file):
+    HF_TOKEN = os.environ.get('HF_TOKEN')
+    
     try:
-        print("🎤 Tentando Coqui TTS...")
+        print("🎤 Tentando Fish Speech...")
         
         voz_referencia = config.get('referencia_voz', 'assets/minha_voz.mp3')
         
         if not os.path.exists(voz_referencia):
-            print(f"⚠️ Arquivo de referência não encontrado")
+            print(f"⚠️ Arquivo de referência não encontrado: {voz_referencia}")
             return criar_audio_edge_tts(texto, output_file)
         
-        # Usar Coqui XTTS
-        client = Client("coqui/xtts")
+        # Conectar ao espaço correto
+        client = Client("fishaudio/fish-speech-1")
         
+        # Listar APIs disponíveis (debug)
+        print("📋 APIs disponíveis:", client.view_api())
+        
+        # Tentar com o endpoint correto
         result = client.predict(
             text=texto,
-            language="pt",
-            speaker_wav=handle_file(voz_referencia),
-            api_name="/predict"
+            reference_audio=handle_file(voz_referencia),
+            reference_text="",
+            api_name="/run"  # ← Tente /run, /generate, ou /tts
         )
         
         if result:
             audio_path = result if isinstance(result, str) else result[0]
             shutil.copy(audio_path, output_file)
-            print("✅ Áudio clonado com Coqui TTS!")
+            print("✅ Áudio clonado com Fish Speech!")
             return output_file
         else:
             raise Exception("Resultado vazio")
             
     except Exception as e:
-        print(f"❌ Erro Coqui TTS: {e}")
+        print(f"❌ Erro Fish Speech: {e}")
+        print("⚠️ Usando Edge TTS como fallback...")
         return criar_audio_edge_tts(texto, output_file)
 
 async def criar_audio_edge_tts_async(texto, output_file):
