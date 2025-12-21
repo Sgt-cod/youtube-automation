@@ -356,7 +356,6 @@ class TelegramCurator:
                     self._processar_callback(update['callback_query'])
         
         except Exception as e:
-            # Silencioso para não poluir logs
             pass
     
     def _processar_mensagem(self, message):
@@ -395,14 +394,12 @@ class TelegramCurator:
             )
             
             print("❌ Usuário cancelou TUDO - encerrando workflow")
-            # O sys.exit(1) será chamado no aguardar_aprovacao()
         
         elif text == '/status':
             atual = data['segmento_atual']
             total = len(data['segmentos'])
             aprovados = len(data.get('aprovacoes', {}))
             
-            # Verificar se está travado
             ultimo_envio_str = "Nunca"
             if data.get('ultimo_envio'):
                 ultimo_envio = datetime.fromisoformat(data['ultimo_envio'])
@@ -445,7 +442,6 @@ class TelegramCurator:
             else:
                 self.enviar_mensagem("❌ Erro ao reenviar. Todos já foram enviados?")
         
-        # Se está aguardando URL
         elif data.get('aguardando_url'):
             self._processar_url_customizada(text, data)
     
@@ -463,10 +459,8 @@ class TelegramCurator:
         
         print(f"🖱️ Botão clicado: {callback_data}")
         
-        # Responder callback
         self._responder_callback(callback_id, "✅ Processando...")
         
-        # Processar ação
         if callback_data.startswith('aprovar_'):
             num = int(callback_data.split('_')[1])
             self._aprovar_segmento(data, num)
@@ -495,7 +489,6 @@ class TelegramCurator:
         
         time.sleep(2)
         
-        # Enviar próximo
         if not self._enviar_proximo_segmento():
             self._finalizar_curacao()
     
@@ -506,7 +499,7 @@ class TelegramCurator:
         
         print(f"🔄 Buscando nova mídia para segmento {num}")
         
-        self.enviar_mensagem(f"🔄 Buscando nova mídia para segmento {num}...")
+        self.enviar_mensagem(f"🔄 Buscando nova mídia...")
         
         try:
             import sys
@@ -538,11 +531,11 @@ class TelegramCurator:
                 time.sleep(2)
                 self._enviar_proximo_segmento()
             else:
-                self.enviar_mensagem("⚠️ Não encontrei outra mídia. Tente 🔗 Enviar URL!")
+                self.enviar_mensagem("⚠️ Não encontrei outra. Tente 🔗 Enviar URL!")
         
         except Exception as e:
-            print(f"❌ Erro ao buscar: {e}")
-            self.enviar_mensagem(f"❌ Erro ao buscar mídia. Tente 🔗 Enviar URL!")
+            print(f"❌ Erro: {e}")
+            self.enviar_mensagem(f"❌ Erro. Tente 🔗 Enviar URL!")
     
     def _solicitar_url(self, data, num):
         """Solicita URL customizada"""
@@ -559,14 +552,12 @@ class TelegramCurator:
         self.enviar_mensagem(
             f"🔗 <b>Envie a URL do Pexels</b>\n\n"
             f"Exemplo:\n"
-            f"<code>https://www.pexels.com/video/ocean-waves-123456/</code>\n\n"
-            f"Ou:\n"
-            f"<code>https://www.pexels.com/photo/mountain-789012/</code>\n\n"
+            f"<code>https://www.pexels.com/video/ocean-123456/</code>\n\n"
             f"💡 Copie e cole a URL completa"
         )
     
     def _processar_url_customizada(self, url, data):
-        """Processa URL customizada enviada pelo usuário"""
+        """Processa URL customizada"""
         idx = data['url_segmento']
         
         print(f"🔍 Processando URL: {url}")
@@ -588,7 +579,7 @@ class TelegramCurator:
                 midia_url = self._obter_foto_pexels(foto_id)
                 tipo = 'foto'
             else:
-                self.enviar_mensagem("❌ URL inválida! Use: https://www.pexels.com/video/...")
+                self.enviar_mensagem("❌ URL inválida!")
                 return
             
             if midia_url:
@@ -604,7 +595,7 @@ class TelegramCurator:
                 with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
                 
-                print(f"✅ URL customizada aplicada ao segmento {idx + 1}")
+                print(f"✅ URL aplicada ao segmento {idx + 1}")
                 
                 self.enviar_mensagem(f"✅ <b>Mídia customizada aplicada!</b>")
                 
@@ -616,11 +607,11 @@ class TelegramCurator:
                 self.enviar_mensagem("❌ Não consegui extrair. Verifique a URL!")
         
         except Exception as e:
-            print(f"❌ Erro ao processar URL: {e}")
+            print(f"❌ Erro: {e}")
             self.enviar_mensagem(f"❌ Erro: {e}")
     
     def _obter_video_pexels(self, video_id):
-        """Obtém URL de download do vídeo"""
+        """Obtém URL do vídeo"""
         try:
             PEXELS_API_KEY = os.environ.get('PEXELS_API_KEY')
             headers = {'Authorization': PEXELS_API_KEY}
@@ -642,12 +633,12 @@ class TelegramCurator:
                 
                 return video['video_files'][0]['link']
         except Exception as e:
-            print(f"❌ Erro ao obter vídeo: {e}")
+            print(f"❌ Erro: {e}")
         
         return None
     
     def _obter_foto_pexels(self, foto_id):
-        """Obtém URL de download da foto"""
+        """Obtém URL da foto"""
         try:
             PEXELS_API_KEY = os.environ.get('PEXELS_API_KEY')
             headers = {'Authorization': PEXELS_API_KEY}
@@ -659,7 +650,7 @@ class TelegramCurator:
                 foto = response.json()
                 return foto['src']['large2x']
         except Exception as e:
-            print(f"❌ Erro ao obter foto: {e}")
+            print(f"❌ Erro: {e}")
         
         return None
     
@@ -676,9 +667,13 @@ class TelegramCurator:
             pass
     
     def notificar_publicacao(self, video_info):
-        """Notifica quando o vídeo for publicado"""
+        """Notifica publicação"""
         mensagem = (
             f"🎉 <b>VÍDEO PUBLICADO!</b>\n\n"
             f"📺 Título: {video_info['titulo']}\n"
             f"⏱️ Duração: {video_info['duracao']:.1f}s\n"
-            f"
+            f"🔗 {video_info['url']}\n\n"
+            f"✅ Disponível no YouTube!"
+        )
+        self.enviar_mensagem(mensagem)
+        print("📤 Notificação enviada")
