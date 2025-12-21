@@ -13,7 +13,20 @@ class TelegramCurator:
         self.bot_token = TELEGRAM_BOT_TOKEN
         self.chat_id = TELEGRAM_CHAT_ID
         self.base_url = f"https://api.telegram.org/bot{self.bot_token}"
-        self.update_id_offset = 0
+        self.update_id_offset = self._obter_ultimo_update_id()
+        
+    def _obter_ultimo_update_id(self):
+        """Obtém o último update_id para não processar mensagens antigas"""
+        try:
+            url = f"{self.base_url}/getUpdates"
+            response = requests.get(url, params={'offset': -1}, timeout=5)
+            result = response.json()
+            
+            if result.get('ok') and result.get('result'):
+                return result['result'][0]['update_id'] + 1
+            return 0
+        except:
+            return 0
         
     def enviar_mensagem(self, texto, reply_markup=None):
         """Envia mensagem de texto"""
@@ -157,6 +170,7 @@ class TelegramCurator:
         }
         
         # Enviar mídia
+        print(f"📤 Enviando segmento {num}/{total}...")
         if midia_tipo == 'video':
             self.enviar_video(midia_info, caption, keyboard)
         else:
@@ -166,6 +180,9 @@ class TelegramCurator:
     
     def _finalizar_curacao(self):
         """Finaliza a curadoria"""
+        if not os.path.exists(CURACAO_FILE):
+            return
+            
         with open(CURACAO_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
@@ -180,33 +197,67 @@ class TelegramCurator:
             f"🎥 Montando e publicando vídeo agora...\n\n"
             f"Você receberá o link assim que for publicado!"
         )
+        
+        print("✅ Curadoria finalizada - criando vídeo...")
     
     def aguardar_aprovacao(self, timeout=3600):
         """Aguarda aprovação interativa do usuário"""
-        print(f"⏳ Aguardando aprovação interativa (timeout: {timeout}s)...")
+        print(f"⏳ Aguardando aprovação interativa...")
+        print(f"⏰ Timeout: {timeout}s ({timeout/60:.0f} minutos)")
+        print(f"🔄 Verificando Telegram a cada 3 segundos...")
         
         inicio = time.time()
+        ultima_verificacao = 0
         
-        while time.time() - inicio < timeout:
+        while True:
+            tempo_decorrido = time.time() - inicio
+            
+            # Verificar timeout
+            if tempo_decorrido >= timeout:
+                print(f"⏰ Timeout atingido após {tempo_decorrido/60:.1f} minutos")
+                print("⚠️ Cancelando curadoria...")
+                
+                # Cancelar automaticamente
+                if os.path.exists(CURACAO_FILE):
+                    with open(CURACAO_FILE, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    data['status'] = 'cancelado'
+                    with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, indent=2, ensure_ascii=False)
+                
+                self.enviar_mensagem(
+                    f"⏰ <b>TIMEOUT ATINGIDO</b>\n\n"
+                    f"Aguardei {timeout/60:.0f} minutos mas não recebi resposta.\n"
+                    f"Curadoria cancelada.\n\n"
+                    f"Para criar o vídeo, execute novamente o workflow."
+                )
+                
+                return None
+            
+            # Mostrar progresso a cada minuto
+            if int(tempo_decorrido) % 60 == 0 and tempo_decorrido != ultima_verificacao:
+                minutos_passados = int(tempo_decorrido / 60)
+                minutos_restantes = int((timeout - tempo_decorrido) / 60)
+                print(f"⏱️ {minutos_passados}min decorridos | {minutos_restantes}min restantes")
+                ultima_verificacao = tempo_decorrido
+            
             # Verificar status
             if os.path.exists(CURACAO_FILE):
                 with open(CURACAO_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 
                 if data['status'] == 'aprovado':
-                    print("✅ Curadoria aprovada!")
+                    print("✅ Curadoria aprovada pelo usuário!")
                     return data['segmentos']
                 elif data['status'] == 'cancelado':
-                    print("❌ Curadoria cancelada")
+                    print("❌ Curadoria cancelada pelo usuário")
                     return None
             
             # Processar atualizações do Telegram
             self._processar_atualizacoes()
             
-            time.sleep(2)
-        
-        print("⏰ Timeout atingido")
-        return None
+            # Aguardar antes da próxima verificação
+            time.sleep(3)
     
     def _processar_atualizacoes(self):
         """Processa mensagens e callbacks do Telegram"""
@@ -237,17 +288,27 @@ class TelegramCurator:
                     self._processar_callback(update['callback_query'])
         
         except Exception as e:
-            pass  # Silencioso para não poluir logs
+            # Silencioso para não poluir logs com erros de conexão
+            pass
     
     def _processar_mensagem(self, message):
         """Processa mensagens de texto"""
         text = message.get('text', '')
         
         if not os.path.exists(CURACAO_FILE):
+            if text == '/start':
+                self.enviar_mensagem(
+                    "👋 <b>Olá! Sou o Curador de Vídeos</b>\n\n"
+                    "Quando um novo vídeo for gerado, enviarei os segmentos "
+                    "para você aprovar um por um.\n\n"
+                    "Aguarde a próxima execução automática!"
+                )
             return
         
         with open(CURACAO_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
+        
+        print(f"📩 Comando recebido: {text}")
         
         # Comandos
         if text == '/cancelar':
@@ -255,24 +316,29 @@ class TelegramCurator:
             with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             
-            self.enviar_mensagem("❌ Vídeo cancelado!")
+            self.enviar_mensagem("❌ <b>Vídeo cancelado!</b>")
+            print("❌ Usuário cancelou a curadoria")
         
         elif text == '/status':
             atual = data['segmento_atual']
             total = len(data['segmentos'])
+            aprovados = len(data.get('aprovacoes', {}))
+            
             self.enviar_mensagem(
-                f"📊 <b>STATUS</b>\n\n"
-                f"✅ Aprovados: {atual}/{total}\n"
-                f"⏳ Status: {data['status']}"
+                f"📊 <b>STATUS DA CURADORIA</b>\n\n"
+                f"✅ Segmentos aprovados: {aprovados}\n"
+                f"📍 Segmento atual: {atual + 1}/{total}\n"
+                f"⏳ Status: {data['status']}\n"
+                f"🕐 Iniciado: {data['timestamp'][:19]}"
             )
         
         elif text == '/pular':
-            # Aprovar todos restantes
+            print("⏭️ Usuário pulou - aprovando todos restantes")
             data['status'] = 'aprovado'
             with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             
-            self.enviar_mensagem("⏭️ Todos os segmentos restantes aprovados!")
+            self.enviar_mensagem("⏭️ <b>Todos os segmentos restantes aprovados!</b>")
         
         # Se está aguardando URL
         elif data.get('aguardando_url'):
@@ -284,10 +350,13 @@ class TelegramCurator:
         callback_id = callback['id']
         
         if not os.path.exists(CURACAO_FILE):
+            self._responder_callback(callback_id, "⚠️ Curadoria expirada")
             return
         
         with open(CURACAO_FILE, 'r', encoding='utf-8') as f:
             data = json.load(f)
+        
+        print(f"🖱️ Botão clicado: {callback_data}")
         
         # Responder callback
         self._responder_callback(callback_id, "✅ Processando...")
@@ -308,13 +377,16 @@ class TelegramCurator:
     def _aprovar_segmento(self, data, num):
         """Aprova o segmento atual"""
         idx = num - 1
+        
+        print(f"✅ Segmento {num} aprovado")
+        
         data['aprovacoes'][str(idx)] = 'aprovado'
         data['segmento_atual'] = idx + 1
         
         with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         
-        self.enviar_mensagem(f"✅ Segmento {num} aprovado!")
+        self.enviar_mensagem(f"✅ <b>Segmento {num} aprovado!</b>")
         
         time.sleep(1)
         
@@ -327,9 +399,10 @@ class TelegramCurator:
         idx = num - 1
         seg = data['segmentos'][idx]
         
+        print(f"🔄 Buscando nova mídia para segmento {num}")
+        
         self.enviar_mensagem(f"🔄 Buscando nova mídia para segmento {num}...")
         
-        # Importar função de busca
         try:
             import sys
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -339,7 +412,6 @@ class TelegramCurator:
             novas_midias = buscar_midia_pexels(seg['keywords'], tipo='video', quantidade=3)
             
             if novas_midias:
-                # Pegar uma diferente da atual
                 midia_atual = seg['midia'][0]
                 nova_midia = None
                 
@@ -351,29 +423,28 @@ class TelegramCurator:
                 if not nova_midia:
                     nova_midia = novas_midias[0]
                 
-                # Atualizar
                 seg['midia'] = nova_midia
                 data['segmentos'][idx] = seg
-                
-                with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
-                
-                # Reenviar segmento
                 data['segmento_atual'] = idx
+                
                 with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
                 
+                print(f"✅ Nova mídia encontrada")
                 time.sleep(1)
                 self._enviar_proximo_segmento()
             else:
-                self.enviar_mensagem("⚠️ Não encontrei outra mídia. Tente enviar URL customizada!")
+                self.enviar_mensagem("⚠️ Não encontrei outra mídia. Tente 🔗 Enviar URL!")
         
         except Exception as e:
-            self.enviar_mensagem(f"❌ Erro ao buscar: {e}\nTente enviar URL customizada!")
+            print(f"❌ Erro ao buscar: {e}")
+            self.enviar_mensagem(f"❌ Erro ao buscar mídia. Tente 🔗 Enviar URL!")
     
     def _solicitar_url(self, data, num):
         """Solicita URL customizada"""
         idx = num - 1
+        
+        print(f"🔗 Solicitando URL para segmento {num}")
         
         data['aguardando_url'] = True
         data['url_segmento'] = idx
@@ -385,22 +456,22 @@ class TelegramCurator:
             f"🔗 <b>Envie a URL do Pexels</b>\n\n"
             f"Exemplo:\n"
             f"<code>https://www.pexels.com/video/ocean-waves-123456/</code>\n\n"
-            f"Ou envie:\n"
+            f"Ou:\n"
             f"<code>https://www.pexels.com/photo/mountain-789012/</code>\n\n"
-            f"💡 Copie e cole a URL completa do vídeo ou foto"
+            f"💡 Copie e cole a URL completa"
         )
     
     def _processar_url_customizada(self, url, data):
         """Processa URL customizada enviada pelo usuário"""
         idx = data['url_segmento']
         
-        self.enviar_mensagem(f"🔍 Extraindo mídia de: {url}")
+        print(f"🔍 Processando URL: {url}")
+        
+        self.enviar_mensagem(f"🔍 Extraindo mídia...")
         
         try:
-            # Extrair ID do Pexels
             import re
             
-            # Padrão: https://www.pexels.com/video/TITULO-NUMEROS/
             match_video = re.search(r'pexels\.com/(?:pt-br/)?video/[^/]+-(\d+)', url)
             match_foto = re.search(r'pexels\.com/(?:pt-br/)?photo/[^/]+-(\d+)', url)
             
@@ -413,17 +484,15 @@ class TelegramCurator:
                 midia_url = self._obter_foto_pexels(foto_id)
                 tipo = 'foto'
             else:
-                self.enviar_mensagem("❌ URL inválida! Use formato: https://www.pexels.com/video/titulo-123456/")
+                self.enviar_mensagem("❌ URL inválida! Use: https://www.pexels.com/video/...")
                 return
             
             if midia_url:
-                # Atualizar segmento
                 seg = data['segmentos'][idx]
                 seg['midia'] = (midia_url, tipo)
                 seg['customizado'] = True
                 data['segmentos'][idx] = seg
                 
-                # Aprovar automaticamente
                 data['aprovacoes'][str(idx)] = 'aprovado'
                 data['segmento_atual'] = idx + 1
                 data['aguardando_url'] = False
@@ -431,17 +500,19 @@ class TelegramCurator:
                 with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
                 
-                self.enviar_mensagem(f"✅ Mídia customizada aplicada ao segmento {idx + 1}!")
+                print(f"✅ URL customizada aplicada ao segmento {idx + 1}")
+                
+                self.enviar_mensagem(f"✅ <b>Mídia customizada aplicada!</b>")
                 
                 time.sleep(1)
                 
-                # Enviar próximo
                 if not self._enviar_proximo_segmento():
                     self._finalizar_curacao()
             else:
-                self.enviar_mensagem("❌ Não consegui extrair a mídia. Verifique a URL!")
+                self.enviar_mensagem("❌ Não consegui extrair. Verifique a URL!")
         
         except Exception as e:
+            print(f"❌ Erro ao processar URL: {e}")
             self.enviar_mensagem(f"❌ Erro: {e}")
     
     def _obter_video_pexels(self, video_id):
@@ -455,8 +526,6 @@ class TelegramCurator:
             
             if response.status_code == 200:
                 video = response.json()
-                
-                # Pegar melhor qualidade
                 VIDEO_TYPE = os.environ.get('VIDEO_TYPE', 'short')
                 
                 for file in video['video_files']:
@@ -467,10 +536,9 @@ class TelegramCurator:
                         if file.get('width', 0) >= 1280:
                             return file['link']
                 
-                # Fallback: primeiro arquivo
                 return video['video_files'][0]['link']
         except Exception as e:
-            print(f"Erro ao obter vídeo: {e}")
+            print(f"❌ Erro ao obter vídeo: {e}")
         
         return None
     
@@ -487,18 +555,21 @@ class TelegramCurator:
                 foto = response.json()
                 return foto['src']['large2x']
         except Exception as e:
-            print(f"Erro ao obter foto: {e}")
+            print(f"❌ Erro ao obter foto: {e}")
         
         return None
     
     def _responder_callback(self, callback_id, texto):
         """Responde ao callback do botão"""
         url = f"{self.base_url}/answerCallbackQuery"
-        requests.post(url, json={
-            'callback_query_id': callback_id,
-            'text': texto,
-            'show_alert': False
-        }, timeout=5)
+        try:
+            requests.post(url, json={
+                'callback_query_id': callback_id,
+                'text': texto,
+                'show_alert': False
+            }, timeout=5)
+        except:
+            pass
     
     def notificar_publicacao(self, video_info):
         """Notifica quando o vídeo for publicado"""
@@ -510,3 +581,4 @@ class TelegramCurator:
             f"✅ Disponível no YouTube agora!"
         )
         self.enviar_mensagem(mensagem)
+        print("📤 Notificação de publicação enviada")
