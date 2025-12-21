@@ -156,7 +156,14 @@ def criar_audio(texto, output_file):
         if HF_TOKEN:
             client.headers.update({"Authorization": f"Bearer {HF_TOKEN}"})
         
-        voz_ref = config.get('referencia_voz', 'assets/minha_voz.mp3')
+        # CORREÇÃO: Ler o caminho da voz de referência do config
+        voz_referencia = config.get('referencia_voz', 'assets/minha_voz.mp3')
+        
+        # Verificar se o arquivo existe
+        if not os.path.exists(voz_referencia):
+            print(f"⚠️ Arquivo de referência não encontrado: {voz_referencia}")
+            print("⚠️ Voltando para Edge TTS...")
+            return criar_audio_edge_tts(texto, output_file)
         
         result = client.predict(
             task="text_to_speech",
@@ -173,11 +180,21 @@ def criar_audio(texto, output_file):
         
         print(f"✅ Áudio clonado com sucesso!")
         return output_file
-
+        
     except Exception as e:
         print(f"❌ Erro Fish Speech: {e}")
-        # Opcional: Você pode manter o edge-tts aqui como um 'plano B'
-        return None
+        print("⚠️ Usando Edge TTS como fallback...")
+        return criar_audio_edge_tts(texto, output_file)
+
+# Adicione esta função de fallback
+async def criar_audio_edge_tts_async(texto, output_file):
+    voz = config.get('voz_fallback', 'pt-BR-AntonioNeural')
+    communicate = edge_tts.Communicate(texto, voz)
+    await communicate.save(output_file)
+    return output_file
+
+def criar_audio_edge_tts(texto, output_file):
+    return asyncio.run(criar_audio_edge_tts_async(texto, output_file))
 
 def extrair_keywords_do_texto(texto):
     prompt = f"""Extraia 3-5 palavras-chave em INGLÊS para buscar imagens/vídeos:
