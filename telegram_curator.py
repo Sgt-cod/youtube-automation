@@ -455,9 +455,9 @@ class TelegramCurator:
         self.enviar_mensagem(
             f"🔗 <b>Envie a URL do Pexels</b>\n\n"
             f"Exemplo:\n"
-            f"<code>https://www.pexels.com/video/ocean-waves-123456/</code>\n\n"
+            f"<code>https://www.pexels.com/pt-br/video/ocean-waves-123456/</code>\n\n"
             f"Ou:\n"
-            f"<code>https://www.pexels.com/photo/mountain-789012/</code>\n\n"
+            f"<code>https://www.pexels.com/pt-br/photo/mountain-789012/</code>\n\n"
             f"💡 Copie e cole a URL completa"
         )
     
@@ -484,7 +484,7 @@ class TelegramCurator:
                 midia_url = self._obter_foto_pexels(foto_id)
                 tipo = 'foto'
             else:
-                self.enviar_mensagem("❌ URL inválida! Use: https://www.pexels.com/video/...")
+                self.enviar_mensagem("❌ URL inválida! Use: https://www.pexels.com/pt-br/video/...")
                 return
             
             if midia_url:
