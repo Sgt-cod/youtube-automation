@@ -2,6 +2,7 @@ import os
 import json
 import requests
 import time
+import sys
 from datetime import datetime
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
@@ -42,7 +43,12 @@ class TelegramCurator:
         
         try:
             response = requests.post(url, json=data, timeout=10)
-            return response.json()
+            result = response.json()
+            if result.get('ok'):
+                return result
+            else:
+                print(f"⚠️ Erro ao enviar mensagem: {result}")
+                return None
         except Exception as e:
             print(f"❌ Erro ao enviar mensagem: {e}")
             return None
@@ -62,7 +68,12 @@ class TelegramCurator:
         
         try:
             response = requests.post(url, json=data, timeout=15)
-            return response.json()
+            result = response.json()
+            if result.get('ok'):
+                return result
+            else:
+                print(f"⚠️ Erro ao enviar foto: {result}")
+                return None
         except Exception as e:
             print(f"❌ Erro ao enviar foto: {e}")
             return None
@@ -82,7 +93,12 @@ class TelegramCurator:
         
         try:
             response = requests.post(url, json=data, timeout=15)
-            return response.json()
+            result = response.json()
+            if result.get('ok'):
+                return result
+            else:
+                print(f"⚠️ Erro ao enviar vídeo: {result}")
+                return None
         except Exception as e:
             print(f"❌ Erro ao enviar vídeo: {e}")
             return None
@@ -98,7 +114,8 @@ class TelegramCurator:
             'status': 'aguardando',
             'segmento_atual': 0,
             'aprovacoes': {},
-            'aguardando_url': False
+            'aguardando_url': False,
+            'ultimo_envio': None
         }
         
         with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
@@ -109,12 +126,12 @@ class TelegramCurator:
             f"🎬 <b>NOVA CURADORIA DE VÍDEO</b>\n\n"
             f"📝 {len(segmentos_com_midias)} segmentos encontrados\n"
             f"⏰ {datetime.now().strftime('%H:%M:%S')}\n\n"
-            f"Vou enviar segmento por segmento para aprovação.\n"
-            f"Você pode aprovar, reprovar ou enviar URL customizada!\n\n"
-            f"Comandos disponíveis:\n"
-            f"• <b>/cancelar</b> - Cancelar este vídeo\n"
+            f"Vou enviar segmento por segmento para aprovação.\n\n"
+            f"<b>Comandos disponíveis:</b>\n"
+            f"• <b>/cancelar</b> - Cancela TUDO (workflow para)\n"
             f"• <b>/status</b> - Ver progresso\n"
-            f"• <b>/pular</b> - Aprovar todos restantes"
+            f"• <b>/pular</b> - Aprovar todos restantes\n"
+            f"• <b>/retomar</b> - Se bot travou, força próximo segmento"
         )
         
         time.sleep(2)
@@ -153,7 +170,8 @@ class TelegramCurator:
             f"📌 <b>Segmento {num}/{total}</b>\n\n"
             f"📝 <i>\"{texto_seg}...\"</i>\n\n"
             f"🔍 Keywords: {', '.join(keywords)}\n"
-            f"🎯 Tipo: {midia_tipo}"
+            f"🎯 Tipo: {midia_tipo}\n\n"
+            f"<i>Se não aparecer o próximo, use /retomar</i>"
         )
         
         # Criar botões
@@ -171,12 +189,24 @@ class TelegramCurator:
         
         # Enviar mídia
         print(f"📤 Enviando segmento {num}/{total}...")
-        if midia_tipo == 'video':
-            self.enviar_video(midia_info, caption, keyboard)
-        else:
-            self.enviar_foto(midia_info, caption, keyboard)
         
-        return True
+        resultado = None
+        if midia_tipo == 'video':
+            resultado = self.enviar_video(midia_info, caption, keyboard)
+        else:
+            resultado = self.enviar_foto(midia_info, caption, keyboard)
+        
+        if resultado:
+            # Registrar timestamp do envio
+            data['ultimo_envio'] = datetime.now().isoformat()
+            with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            print(f"✅ Segmento {num} enviado com sucesso")
+            return True
+        else:
+            print(f"❌ Falha ao enviar segmento {num}")
+            return False
     
     def _finalizar_curacao(self):
         """Finaliza a curadoria"""
@@ -208,6 +238,7 @@ class TelegramCurator:
         
         inicio = time.time()
         ultima_verificacao = 0
+        ultimo_aviso_travamento = 0
         
         while True:
             tempo_decorrido = time.time() - inicio
@@ -215,20 +246,19 @@ class TelegramCurator:
             # Verificar timeout
             if tempo_decorrido >= timeout:
                 print(f"⏰ Timeout atingido após {tempo_decorrido/60:.1f} minutos")
-                print("⚠️ Cancelando curadoria...")
+                print("⚠️ Cancelando curadoria automaticamente...")
                 
-                # Cancelar automaticamente
                 if os.path.exists(CURACAO_FILE):
                     with open(CURACAO_FILE, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    data['status'] = 'cancelado'
+                    data['status'] = 'timeout'
                     with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
                         json.dump(data, f, indent=2, ensure_ascii=False)
                 
                 self.enviar_mensagem(
                     f"⏰ <b>TIMEOUT ATINGIDO</b>\n\n"
                     f"Aguardei {timeout/60:.0f} minutos mas não recebi resposta.\n"
-                    f"Curadoria cancelada.\n\n"
+                    f"Curadoria cancelada automaticamente.\n\n"
                     f"Para criar o vídeo, execute novamente o workflow."
                 )
                 
@@ -241,6 +271,33 @@ class TelegramCurator:
                 print(f"⏱️ {minutos_passados}min decorridos | {minutos_restantes}min restantes")
                 ultima_verificacao = tempo_decorrido
             
+            # Verificar se bot travou (mais de 2 minutos sem resposta)
+            if os.path.exists(CURACAO_FILE):
+                with open(CURACAO_FILE, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                if data.get('ultimo_envio'):
+                    ultimo_envio = datetime.fromisoformat(data['ultimo_envio'])
+                    tempo_sem_resposta = (datetime.now() - ultimo_envio).total_seconds()
+                    
+                    # Avisar a cada 2 minutos
+                    if tempo_sem_resposta > 120 and tempo_sem_resposta - ultimo_aviso_travamento > 120:
+                        minutos_travado = int(tempo_sem_resposta / 60)
+                        seg_atual = data['segmento_atual'] + 1
+                        total = len(data['segmentos'])
+                        
+                        self.enviar_mensagem(
+                            f"⚠️ <b>BOT PODE ESTAR TRAVADO</b>\n\n"
+                            f"Aguardando resposta há {minutos_travado} minutos...\n"
+                            f"Último segmento: {seg_atual}/{total}\n\n"
+                            f"Se não recebeu o próximo segmento:\n"
+                            f"• Use <b>/retomar</b> para forçar envio\n"
+                            f"• Ou use <b>/status</b> para ver situação"
+                        )
+                        
+                        ultimo_aviso_travamento = tempo_sem_resposta
+                        print(f"⚠️ Possível travamento detectado - {minutos_travado}min sem resposta")
+            
             # Verificar status
             if os.path.exists(CURACAO_FILE):
                 with open(CURACAO_FILE, 'r', encoding='utf-8') as f:
@@ -249,9 +306,20 @@ class TelegramCurator:
                 if data['status'] == 'aprovado':
                     print("✅ Curadoria aprovada pelo usuário!")
                     return data['segmentos']
+                
                 elif data['status'] == 'cancelado':
                     print("❌ Curadoria cancelada pelo usuário")
-                    return None
+                    print("🛑 Encerrando workflow...")
+                    
+                    # CANCELAR WORKFLOW COMPLETAMENTE
+                    self.enviar_mensagem(
+                        "🛑 <b>WORKFLOW CANCELADO</b>\n\n"
+                        "Encerrando processo...\n"
+                        "Nenhum vídeo será criado."
+                    )
+                    
+                    # Encerrar o processo Python
+                    sys.exit(1)  # Exit code 1 = erro, cancela o workflow
             
             # Processar atualizações do Telegram
             self._processar_atualizacoes()
@@ -288,7 +356,7 @@ class TelegramCurator:
                     self._processar_callback(update['callback_query'])
         
         except Exception as e:
-            # Silencioso para não poluir logs com erros de conexão
+            # Silencioso para não poluir logs
             pass
     
     def _processar_mensagem(self, message):
@@ -312,24 +380,43 @@ class TelegramCurator:
         
         # Comandos
         if text == '/cancelar':
+            print("🛑 COMANDO /CANCELAR RECEBIDO - CANCELANDO TUDO")
+            
             data['status'] = 'cancelado'
             with open(CURACAO_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             
-            self.enviar_mensagem("❌ <b>Vídeo cancelado!</b>")
-            print("❌ Usuário cancelou a curadoria")
+            self.enviar_mensagem(
+                "🛑 <b>CANCELAMENTO TOTAL ATIVADO</b>\n\n"
+                "❌ Curadoria cancelada\n"
+                "❌ Criação do vídeo cancelada\n"
+                "❌ Workflow será encerrado\n\n"
+                "Nenhum vídeo será publicado."
+            )
+            
+            print("❌ Usuário cancelou TUDO - encerrando workflow")
+            # O sys.exit(1) será chamado no aguardar_aprovacao()
         
         elif text == '/status':
             atual = data['segmento_atual']
             total = len(data['segmentos'])
             aprovados = len(data.get('aprovacoes', {}))
             
+            # Verificar se está travado
+            ultimo_envio_str = "Nunca"
+            if data.get('ultimo_envio'):
+                ultimo_envio = datetime.fromisoformat(data['ultimo_envio'])
+                tempo_decorrido = (datetime.now() - ultimo_envio).total_seconds()
+                ultimo_envio_str = f"{int(tempo_decorrido / 60)} minutos atrás"
+            
             self.enviar_mensagem(
                 f"📊 <b>STATUS DA CURADORIA</b>\n\n"
                 f"✅ Segmentos aprovados: {aprovados}\n"
                 f"📍 Segmento atual: {atual + 1}/{total}\n"
                 f"⏳ Status: {data['status']}\n"
-                f"🕐 Iniciado: {data['timestamp'][:19]}"
+                f"🕐 Último envio: {ultimo_envio_str}\n"
+                f"📅 Iniciado: {data['timestamp'][:19]}\n\n"
+                f"<i>Se travou, use /retomar</i>"
             )
         
         elif text == '/pular':
@@ -339,6 +426,24 @@ class TelegramCurator:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             
             self.enviar_mensagem("⏭️ <b>Todos os segmentos restantes aprovados!</b>")
+        
+        elif text == '/retomar':
+            print("🔄 Comando /retomar - forçando envio do próximo segmento")
+            
+            atual = data['segmento_atual']
+            total = len(data['segmentos'])
+            
+            self.enviar_mensagem(
+                f"🔄 <b>RETOMANDO CURADORIA</b>\n\n"
+                f"Forçando envio do segmento {atual + 1}/{total}..."
+            )
+            
+            time.sleep(1)
+            
+            if self._enviar_proximo_segmento():
+                self.enviar_mensagem("✅ Segmento reenviado com sucesso!")
+            else:
+                self.enviar_mensagem("❌ Erro ao reenviar. Todos já foram enviados?")
         
         # Se está aguardando URL
         elif data.get('aguardando_url'):
@@ -388,7 +493,7 @@ class TelegramCurator:
         
         self.enviar_mensagem(f"✅ <b>Segmento {num} aprovado!</b>")
         
-        time.sleep(1)
+        time.sleep(2)
         
         # Enviar próximo
         if not self._enviar_proximo_segmento():
@@ -408,7 +513,6 @@ class TelegramCurator:
             sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
             from generate_video import buscar_midia_pexels
             
-            # Buscar nova mídia
             novas_midias = buscar_midia_pexels(seg['keywords'], tipo='video', quantidade=3)
             
             if novas_midias:
@@ -431,7 +535,7 @@ class TelegramCurator:
                     json.dump(data, f, indent=2, ensure_ascii=False)
                 
                 print(f"✅ Nova mídia encontrada")
-                time.sleep(1)
+                time.sleep(2)
                 self._enviar_proximo_segmento()
             else:
                 self.enviar_mensagem("⚠️ Não encontrei outra mídia. Tente 🔗 Enviar URL!")
@@ -455,9 +559,9 @@ class TelegramCurator:
         self.enviar_mensagem(
             f"🔗 <b>Envie a URL do Pexels</b>\n\n"
             f"Exemplo:\n"
-            f"<code>https://www.pexels.com/pt-br/video/ocean-waves-123456/</code>\n\n"
+            f"<code>https://www.pexels.com/video/ocean-waves-123456/</code>\n\n"
             f"Ou:\n"
-            f"<code>https://www.pexels.com/pt-br/photo/mountain-789012/</code>\n\n"
+            f"<code>https://www.pexels.com/photo/mountain-789012/</code>\n\n"
             f"💡 Copie e cole a URL completa"
         )
     
@@ -484,7 +588,7 @@ class TelegramCurator:
                 midia_url = self._obter_foto_pexels(foto_id)
                 tipo = 'foto'
             else:
-                self.enviar_mensagem("❌ URL inválida! Use: https://www.pexels.com/pt-br/video/...")
+                self.enviar_mensagem("❌ URL inválida! Use: https://www.pexels.com/video/...")
                 return
             
             if midia_url:
@@ -504,7 +608,7 @@ class TelegramCurator:
                 
                 self.enviar_mensagem(f"✅ <b>Mídia customizada aplicada!</b>")
                 
-                time.sleep(1)
+                time.sleep(2)
                 
                 if not self._enviar_proximo_segmento():
                     self._finalizar_curacao()
@@ -577,8 +681,4 @@ class TelegramCurator:
             f"🎉 <b>VÍDEO PUBLICADO!</b>\n\n"
             f"📺 Título: {video_info['titulo']}\n"
             f"⏱️ Duração: {video_info['duracao']:.1f}s\n"
-            f"🔗 {video_info['url']}\n\n"
-            f"✅ Disponível no YouTube agora!"
-        )
-        self.enviar_mensagem(mensagem)
-        print("📤 Notificação de publicação enviada")
+            f"
