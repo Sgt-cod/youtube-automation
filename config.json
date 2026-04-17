@@ -1,0 +1,47 @@
+{
+  "canal": "reflexoes",
+  "voz": "pt-BR-ThalitaMultilingualNeural",
+  "duracao_alvo_minutos": 7,
+  "temas": [
+    "o significado do silêncio interior",
+    "por que sofremos e o que isso nos ensina",
+    "a arte de viver sem pressa",
+    "o poder da aceitação radical",
+    "estoicismo e a vida moderna",
+    "o que é realmente a felicidade",
+    "a ilusão do controle e como lidar com ela",
+    "Marcus Aurelius e as meditações",
+    "budismo e o desapego",
+    "Jung e o autoconhecimento",
+    "por que a gratidão transforma a vida",
+    "a morte como mestra da vida",
+    "Viktor Frankl e o sentido do sofrimento",
+    "Epictetus e a liberdade interior",
+    "o ego e o verdadeiro self",
+    "como a natureza ensina sobre existência",
+    "a sabedoria dos provérbios antigos",
+    "mindfulness além da meditação",
+    "o paradoxo da escolha e a liberdade",
+    "Alan Watts e a arte de viver"
+  ],
+  "rss_feeds_inspiracao": [
+    "https://www.philosophybites.libsyn.com/rss",
+    "https://feeds.feedburner.com/brainpickings/rss"
+  ],
+  "estilos_narrativa": [
+    "reflexivo e contemplativo",
+    "filosófico e acessível",
+    "inspirador e profundo",
+    "narrativo com exemplos da vida real"
+  ],
+  "pexels_queries": {
+    "natureza": ["nature landscape", "forest light", "mountain sunrise", "ocean waves", "river flowing"],
+    "pessoas": ["person meditating", "person walking alone", "silhouette sunset", "person reading"],
+    "abstrato": ["light rays", "water reflection", "fog morning", "stars night sky", "candle flame"],
+    "urbano": ["empty street rain", "city lights night", "old library", "coffee solitude"]
+  },
+  "youtube": {
+    "categoria_id": "27",
+    "tags_base": ["filosofia", "reflexão", "espiritualidade", "autoconhecimento", "desenvolvimento pessoal", "meditação", "estoicismo", "psicologia", "vida", "motivação"]
+  }
+}
