@@ -30,6 +30,14 @@ jobs:
       - name: Instalar dependencias Python
         run: pip install -r requirements.txt
 
+      - name: Instalar Deno (runtime JS exigido pelo yt-dlp)
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      - name: Atualizar yt-dlp para a ultima versao
+        run: pip install -U yt-dlp
+
       - name: Gerar cookies.txt para o yt-dlp
         env:
           YOUTUBE_COOKIES_TXT: ${{ secrets.YOUTUBE_COOKIES_TXT }}
