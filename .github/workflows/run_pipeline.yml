@@ -35,7 +35,11 @@ jobs:
         run: |
           echo "${{ secrets.YOUTUBE_CLIENT_SECRETS_JSON }}" > client_secrets.json
           echo "${{ secrets.YOUTUBE_TOKEN_JSON }}" > token.json
-          python pipeline.py --video-id ${{ github.event.inputs.video_id }}
+          if [ -n "${{ github.event.inputs.video_id }}" ]; then
+            python pipeline.py --video-id "${{ github.event.inputs.video_id }}"
+          else
+            python pipeline.py
+          fi
 
 # Configure em Settings > Secrets and variables > Actions do seu repo:
 # YOUTUBE_API_KEY, GEMINI_API_KEY, YOUTUBE_CLIENT_SECRETS_JSON, YOUTUBE_TOKEN_JSON
