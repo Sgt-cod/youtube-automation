@@ -1,0 +1,29 @@
+{
+  "_comentario": "Adicione aqui APENAS canais seus ou com autorizacao expressa por escrito do titular. O pipeline recusa a rodar em canais fora desta lista.",
+  "canais_autorizados": [
+    {
+      "channel_id": ""UC3BM4LVGTrG5OER815AM7Bg",
+      "nome": "Fala Glauber",
+      "autorizado_por": "proprio titular",
+      "data_autorizacao": "2026-08-19"
+    },
+    {
+      "channel_id": "UC4ncvgh5hFr5O83MH7-jRJg",
+      "nome": "Flow Podcast",
+      "autorizado_por": "proprio titular",
+      "data_autorizacao": "2026-08-15"
+    },
+    {
+      "channel_id": "UChBtPExX9RjCdmpAizK7ccQ",
+      "nome": "Irmãos Dias Podcast",
+      "autorizado_por": "Agência de Marketing",
+      "data_autorizacao": "2026-08-13"
+    },
+    {
+      "channel_id": "UCkzDpSF1zTOnOKbkWT8Xwog",
+      "nome": "Joel Jota",
+      "autorizado_por": "Agência de Marketing",
+      "data_autorizacao": "2026-08-11"
+    }
+  ]
+}
