@@ -23,7 +23,13 @@ jobs:
           python-version: "3.11"
 
       - name: Instalar ffmpeg
-        uses: FedericoCarboni/setup-ffmpeg@v3
+        run: |
+          curl -L https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz -o ffmpeg.tar.xz
+          tar -xf ffmpeg.tar.xz
+          sudo mv ffmpeg-master-latest-linux64-gpl/bin/ffmpeg /usr/local/bin/
+          sudo mv ffmpeg-master-latest-linux64-gpl/bin/ffprobe /usr/local/bin/
+          rm -rf ffmpeg.tar.xz ffmpeg-master-latest-linux64-gpl
+          ffmpeg -version
 
       - name: Instalar dependencias Python
         run: pip install -r requirements.txt
