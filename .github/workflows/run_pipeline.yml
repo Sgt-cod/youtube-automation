@@ -20,9 +20,9 @@ jobs:
           python-version: "3.11"
 
       - name: Instalar ffmpeg
-  run: |
-    sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=10
-    sudo apt-get install -y ffmpeg
+        run: |
+          sudo apt-get update -o Acquire::Retries=2 -o Acquire::http::Timeout=10
+          sudo apt-get install -y ffmpeg
 
       - name: Instalar dependencias Python
         run: pip install -r requirements.txt
