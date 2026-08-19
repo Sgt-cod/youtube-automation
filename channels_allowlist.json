@@ -2,7 +2,7 @@
   "_comentario": "Adicione aqui APENAS canais seus ou com autorizacao expressa por escrito do titular. O pipeline recusa a rodar em canais fora desta lista.",
   "canais_autorizados": [
     {
-      "channel_id": ""UC3BM4LVGTrG5OER815AM7Bg",
+      "channel_id": "UC3BM4LVGTrG5OER815AM7Bg",
       "nome": "Fala Glauber",
       "autorizado_por": "proprio titular",
       "data_autorizacao": "2026-08-19"
