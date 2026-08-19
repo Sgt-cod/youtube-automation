@@ -30,6 +30,7 @@ def download_video(video_id: str) -> str:
         "yt-dlp",
         "-f", "bv*[height<=1080]+ba/b[height<=1080]",
         "--merge-output-format", "mp4",
+        "--remote-components", "ejs:github",
         "-o", out_template,
     ]
 
