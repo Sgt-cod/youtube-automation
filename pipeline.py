@@ -1,24 +1,38 @@
 """Roda o pipeline completo para um video: download -> transcricao ->
 highlights -> cortes -> upload."""
 import argparse
+import os
 
 import analyze_highlights
 import cut_shorts
 import download
+import select_video
 import transcribe
 import upload_short
+from allowlist import assert_channel_authorized
 
 
-def run(video_id: str, publish: bool = True):
+def run(video_id: str = None, publish: bool = True):
+    api_key = os.environ["YOUTUBE_API_KEY"]
+
+    if video_id:
+        # video-id veio manual (workflow_dispatch): ainda precisa validar o canal
+        channel_id = download.get_video_channel_id(video_id, api_key)
+    else:
+        print("== 0/5 Escolhendo video automaticamente ==")
+        video_id, channel_id = select_video.pick_video(api_key)
+        print(f"Selecionado: {video_id} (canal {channel_id})")
+
+    assert_channel_authorized(channel_id)
+
     print(f"== 1/5 Download: {video_id} ==")
     video_path = download.download_video(video_id)
-    # nota: download.main() ja checa a allowlist antes de chegar aqui
 
     print("== 2/5 Transcricao ==")
     transcribe.transcribe(video_path, video_id)
 
     print("== 3/5 Analise de highlights (Gemini) ==")
-    import json, os
+    import json
     with open(f"transcripts/{video_id}.json", encoding="utf-8") as f:
         segments = json.load(f)
     highlights = analyze_highlights.find_highlights_gemini(segments)
@@ -43,10 +57,18 @@ def run(video_id: str, publish: bool = True):
     else:
         print("Publicacao pulada (--no-publish). Confira a pasta shorts/ antes de subir.")
 
+    select_video.mark_processed(video_id)
+
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--video-id", required=True)
+    parser.add_argument(
+        "--video-id",
+        required=False,
+        default=None,
+        help="ID do video (opcional). Se omitido, escolhe automaticamente um "
+        "video recente de um canal aleatorio da allowlist.",
+    )
     parser.add_argument("--no-publish", action="store_true", help="gera os clipes mas nao publica")
     args = parser.parse_args()
     run(args.video_id, publish=not args.no_publish)
