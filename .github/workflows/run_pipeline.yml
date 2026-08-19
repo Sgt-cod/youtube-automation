@@ -1,0 +1,40 @@
+name: Gerar Shorts automaticamente
+
+on:
+  schedule:
+    - cron: "0 12 * * *"  # todo dia 12h UTC (9h Brasilia) - ajuste como quiser
+  workflow_dispatch:
+    inputs:
+      video_id:
+        description: "ID do video do YouTube"
+        required: true
+
+jobs:
+  gerar-shorts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Instalar dependencias Python
+        run: pip install -r requirements.txt
+
+      - name: Rodar pipeline
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          YOUTUBE_OAUTH_CLIENT_SECRETS: client_secrets.json
+        run: |
+          echo "${{ secrets.YOUTUBE_CLIENT_SECRETS_JSON }}" > client_secrets.json
+          echo "${{ secrets.YOUTUBE_TOKEN_JSON }}" > token.json
+          python pipeline.py --video-id ${{ github.event.inputs.video_id }}
+
+# Configure em Settings > Secrets and variables > Actions do seu repo:
+# YOUTUBE_API_KEY, GEMINI_API_KEY, YOUTUBE_CLIENT_SECRETS_JSON, YOUTUBE_TOKEN_JSON
+# (token.json e gerado localmente na primeira autorizacao OAuth, ver upload_short.py)
