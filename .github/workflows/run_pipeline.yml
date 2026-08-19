@@ -30,6 +30,17 @@ jobs:
       - name: Instalar dependencias Python
         run: pip install -r requirements.txt
 
+      - name: Gerar cookies.txt para o yt-dlp
+        env:
+          YOUTUBE_COOKIES_TXT: ${{ secrets.YOUTUBE_COOKIES_TXT }}
+        run: |
+          if [ -n "$YOUTUBE_COOKIES_TXT" ]; then
+            printf '%s' "$YOUTUBE_COOKIES_TXT" > cookies.txt
+            echo "cookies.txt gerado."
+          else
+            echo "Secret YOUTUBE_COOKIES_TXT nao configurado, seguindo sem cookies."
+          fi
+
       - name: Rodar pipeline
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
@@ -58,5 +69,6 @@ jobs:
           fi
 
 # Configure em Settings > Secrets and variables > Actions do seu repo:
-# YOUTUBE_API_KEY, GEMINI_API_KEY, YOUTUBE_CLIENT_SECRETS_JSON, YOUTUBE_TOKEN_JSON
+# YOUTUBE_API_KEY, GEMINI_API_KEY, YOUTUBE_CLIENT_SECRETS_JSON, YOUTUBE_TOKEN_JSON, YOUTUBE_COOKIES_TXT
 # (token.json e gerado localmente na primeira autorizacao OAuth, ver upload_short.py)
+# (cookies.txt e exportado do navegador logado no YouTube, formato Netscape, ver docs do yt-dlp)
