@@ -7,7 +7,7 @@ on:
     inputs:
       video_id:
         description: "ID do video do YouTube"
-        required: true
+        required: false
 
 jobs:
   gerar-shorts:
