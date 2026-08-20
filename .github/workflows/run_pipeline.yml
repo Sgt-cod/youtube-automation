@@ -57,10 +57,8 @@ jobs:
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          YOUTUBE_OAUTH_CLIENT_SECRETS: client_secrets.json
+          YOUTUBE_CREDENTIALS: ${{ secrets.YOUTUBE_CREDENTIALS }}
         run: |
-          echo "${{ secrets.YOUTUBE_CLIENT_SECRETS_JSON }}" > client_secrets.json
-          echo "${{ secrets.YOUTUBE_TOKEN_JSON }}" > token.json
           if [ -n "${{ github.event.inputs.video_id }}" ]; then
             python pipeline.py --video-id "${{ github.event.inputs.video_id }}"
           else
@@ -81,6 +79,6 @@ jobs:
           fi
 
 # Configure em Settings > Secrets and variables > Actions do seu repo:
-# YOUTUBE_API_KEY, GEMINI_API_KEY, YOUTUBE_CLIENT_SECRETS_JSON, YOUTUBE_TOKEN_JSON, YOUTUBE_COOKIES_TXT
-# (token.json e gerado localmente na primeira autorizacao OAuth, ver upload_short.py)
+# YOUTUBE_API_KEY, GEMINI_API_KEY, YOUTUBE_CREDENTIALS, YOUTUBE_COOKIES_TXT
+# (YOUTUBE_CREDENTIALS e gerado rodando gerar_credenciais_youtube.py localmente, uma unica vez)
 # (cookies.txt e exportado do navegador logado no YouTube, formato Netscape, ver docs do yt-dlp)
