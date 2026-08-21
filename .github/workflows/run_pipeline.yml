@@ -2,7 +2,9 @@ name: Gerar Shorts automaticamente
 
 on:
   schedule:
-    - cron: "0 12 * * *"  # todo dia 12h UTC (9h Brasilia) - ajuste como quiser
+    - cron: "0 10 * * *"  # 7h Brasilia (UTC-3)
+    - cron: "0 16 * * *"  # 13h Brasilia (UTC-3)
+    - cron: "0 22 * * *"  # 19h Brasilia (UTC-3)
   workflow_dispatch:
     inputs:
       video_id:
