@@ -19,7 +19,7 @@ WATERMARK_WIDTH = 220      # largura da logo em pixels (video final tem 1080 de 
 
 WORDS_PER_CAPTION = 4       # no maximo N palavras exibidas por vez (estilo karaoke)
 SUBTITLE_FONT_NAME = "Bangers"
-SUBTITLE_FONT_SIZE = 64     # relativo a original_size=1080x1920 (ver nota abaixo)
+SUBTITLE_FONT_SIZE = 20     # relativo a original_size=1080x1920 (ver nota abaixo)
 
 
 def _seconds_to_ts(seconds: float) -> str:
