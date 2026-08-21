@@ -1,6 +1,5 @@
 """
 Publica o Short no YouTube.
-
 Reaproveita o padrao ja usado no seu outro projeto: a variavel de ambiente
 YOUTUBE_CREDENTIALS contem o JSON completo gerado por Credentials.to_json()
 (token, refresh_token, client_id, client_secret, scopes tudo junto). Nao
@@ -26,9 +25,26 @@ def get_credentials() -> Credentials:
     return creds
 
 
-def upload_short(video_path: str, title: str, description: str, tags: list[str] | None = None):
+def upload_short(
+    video_path: str,
+    title: str,
+    description: str,
+    tags: list[str] | None = None,
+    publish_at: str | None = None,
+):
+    """Se publish_at for informado (string ISO 8601 UTC, ex:
+    '2026-08-20T13:00:00Z'), o video sobe como privado e o YouTube
+    publica ele automaticamente nesse horario. Se for None, publica
+    imediatamente como publico."""
     creds = get_credentials()
     youtube = build("youtube", "v3", credentials=creds)
+
+    status = {"selfDeclaredMadeForKids": False}
+    if publish_at:
+        status["privacyStatus"] = "private"
+        status["publishAt"] = publish_at
+    else:
+        status["privacyStatus"] = "public"
 
     body = {
         "snippet": {
@@ -37,23 +53,20 @@ def upload_short(video_path: str, title: str, description: str, tags: list[str] 
             "tags": tags or [],
             "categoryId": "24",  # Entretenimento; ajuste se quiser
         },
-        "status": {
-            "privacyStatus": "public",  # troque para "private" se quiser revisar antes
-            "selfDeclaredMadeForKids": False,
-        },
+        "status": status,
     }
-
     media = MediaFileUpload(video_path, chunksize=-1, resumable=True, mimetype="video/mp4")
     request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
-
     response = None
     while response is None:
-        status, response = request.next_chunk()
-        if status:
-            print(f"Upload {int(status.progress() * 100)}%")
-
+        status_progress, response = request.next_chunk()
+        if status_progress:
+            print(f"Upload {int(status_progress.progress() * 100)}%")
     video_id = response["id"]
-    print(f"[OK] Publicado: https://youtube.com/shorts/{video_id}")
+    if publish_at:
+        print(f"[OK] Programado para {publish_at}: https://youtube.com/shorts/{video_id}")
+    else:
+        print(f"[OK] Publicado: https://youtube.com/shorts/{video_id}")
     return video_id
 
 
@@ -61,10 +74,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--video-id", required=True, help="ID do video original (para achar os clipes gerados)")
     args = parser.parse_args()
-
     with open(f"highlights/{args.video_id}.json", "r", encoding="utf-8") as f:
         highlights = json.load(f)
-
     for i, clip in enumerate(highlights):
         clip_path = f"shorts/{args.video_id}_{i}.mp4"
         titulo = clip.get("titulo", f"Corte {i+1}")
