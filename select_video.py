@@ -1,13 +1,36 @@
 """Escolhe automaticamente um video recente de um canal aleatorio da allowlist."""
+import json
 import os
 import random
-import json
+import re
 
 from googleapiclient.discovery import build
 
 from allowlist import load_allowlist
 
 PROCESSED_PATH = "processed_videos.json"
+
+# Shorts do YouTube podem durar ate 3 minutos. Exigir bem mais que isso
+# garante que so peguemos videos longos (entrevistas, podcasts etc), nunca
+# um Short que o proprio canal ja publicou.
+MIN_SOURCE_DURATION_SECONDS = 240  # 4 minutos
+
+_ISO8601_DURATION_RE = re.compile(
+    r"P(?:(?P<days>\d+)D)?T?(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?"
+)
+
+
+def _parse_iso8601_duration(duration: str) -> int:
+    """Converte 'PT4M13S' (formato da API do YouTube) para segundos."""
+    match = _ISO8601_DURATION_RE.match(duration or "")
+    if not match:
+        return 0
+    parts = match.groupdict()
+    days = int(parts["days"] or 0)
+    hours = int(parts["hours"] or 0)
+    minutes = int(parts["minutes"] or 0)
+    seconds = int(parts["seconds"] or 0)
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
 def _load_processed() -> set:
@@ -33,7 +56,7 @@ def _get_uploads_playlist_id(youtube, channel_id: str) -> str:
     return items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
 
-def _get_recent_video_ids(youtube, uploads_playlist_id: str, max_results: int = 10) -> list:
+def _get_recent_video_ids(youtube, uploads_playlist_id: str, max_results: int = 20) -> list:
     resp = youtube.playlistItems().list(
         part="contentDetails",
         playlistId=uploads_playlist_id,
@@ -42,10 +65,24 @@ def _get_recent_video_ids(youtube, uploads_playlist_id: str, max_results: int = 
     return [item["contentDetails"]["videoId"] for item in resp.get("items", [])]
 
 
+def _get_video_durations(youtube, video_ids: list) -> dict:
+    """Retorna {video_id: duracao_em_segundos}. A API do YouTube nao
+    diferencia 'Short' de 'video normal' diretamente - a duracao e o jeito
+    confiavel de filtrar Shorts (que vao ate 3 minutos)."""
+    durations = {}
+    for i in range(0, len(video_ids), 50):  # videos.list aceita ate 50 ids por chamada
+        batch = video_ids[i:i + 50]
+        resp = youtube.videos().list(part="contentDetails", id=",".join(batch)).execute()
+        for item in resp.get("items", []):
+            durations[item["id"]] = _parse_iso8601_duration(item["contentDetails"]["duration"])
+    return durations
+
+
 def pick_video(api_key: str, max_attempts: int = 10) -> tuple:
     """Sorteia um canal da allowlist e retorna (video_id, channel_id) de um
-    video recente ainda nao processado. Levanta RuntimeError se nao achar
-    nenhum candidato depois de `max_attempts` tentativas."""
+    video LONGO recente ainda nao processado (Shorts sao descartados).
+    Levanta RuntimeError se nao achar nenhum candidato depois de
+    `max_attempts` tentativas."""
     channel_ids = list(load_allowlist())
     if not channel_ids:
         raise RuntimeError("Allowlist vazia, adicione canais em channels_allowlist.json")
@@ -65,7 +102,15 @@ def pick_video(api_key: str, max_attempts: int = 10) -> tuple:
             continue
 
         recent_ids = _get_recent_video_ids(youtube, uploads_id)
-        candidates = [v for v in recent_ids if v not in processed]
+        not_processed = [v for v in recent_ids if v not in processed]
+        if not not_processed:
+            continue
+
+        durations = _get_video_durations(youtube, not_processed)
+        candidates = [
+            v for v in not_processed
+            if durations.get(v, 0) >= MIN_SOURCE_DURATION_SECONDS
+        ]
         if not candidates:
             continue
 
@@ -73,6 +118,6 @@ def pick_video(api_key: str, max_attempts: int = 10) -> tuple:
         return video_id, channel_id
 
     raise RuntimeError(
-        "Nao foi possivel achar um video novo em nenhum canal da allowlist "
-        f"(tentativas: {attempts})."
+        "Nao foi possivel achar um video longo novo em nenhum canal da "
+        f"allowlist (tentativas: {attempts})."
     )
