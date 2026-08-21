@@ -21,6 +21,16 @@ def get_video_channel_id(video_id: str, api_key: str) -> str:
     return items[0]["snippet"]["channelId"]
 
 
+def get_channel_title(channel_id: str, api_key: str) -> str:
+    """Nome atual do canal, usado para credito na descricao do short."""
+    youtube = build("youtube", "v3", developerKey=api_key)
+    resp = youtube.channels().list(part="snippet", id=channel_id).execute()
+    items = resp.get("items", [])
+    if not items:
+        return channel_id
+    return items[0]["snippet"]["title"]
+
+
 def download_video(video_id: str) -> str:
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     out_template = os.path.join(OUTPUT_DIR, f"{video_id}.%(ext)s")
