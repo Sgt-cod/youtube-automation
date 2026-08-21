@@ -86,6 +86,27 @@ def _enforce_duration(highlight: dict, segments: list[dict]) -> dict:
     return {**highlight, "start": start, "end": end}
 
 
+def _dedupe_highlights(highlights: list[dict], overlap_threshold: float = 0.6) -> list[dict]:
+    """Remove trechos que sobrepoem demais um trecho ja aceito (ex: quando
+    a extensao de duracao minima faz dois highlights curtos convergirem
+    para praticamente o mesmo intervalo). Mantem a ordem de preferencia
+    original do Gemini (primeira ocorrencia de cada intervalo e mantida)."""
+    accepted = []
+    for h in highlights:
+        h_dur = h["end"] - h["start"]
+        is_dupe = False
+        for a in accepted:
+            overlap = max(0, min(h["end"], a["end"]) - max(h["start"], a["start"]))
+            a_dur = a["end"] - a["start"]
+            shorter = min(h_dur, a_dur)
+            if shorter > 0 and overlap / shorter > overlap_threshold:
+                is_dupe = True
+                break
+        if not is_dupe:
+            accepted.append(h)
+    return accepted
+
+
 def find_highlights_gemini(segments: list[dict]) -> list[dict]:
     api_key = os.environ["GEMINI_API_KEY"]
     client = genai.Client(api_key=api_key)
@@ -107,7 +128,8 @@ def find_highlights_gemini(segments: list[dict]) -> list[dict]:
             text = response.text.strip()
             text = text.removeprefix("```json").removesuffix("```").strip()
             highlights = json.loads(text)
-            return [_enforce_duration(h, segments) for h in highlights]
+            highlights = [_enforce_duration(h, segments) for h in highlights]
+            return _dedupe_highlights(highlights)
         except Exception as e:
             if "429" in str(e) and attempt < 2:
                 time.sleep(20)  # cota do free tier: espera e tenta de novo
