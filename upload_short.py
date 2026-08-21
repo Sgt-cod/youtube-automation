@@ -70,6 +70,16 @@ def upload_short(
     return video_id
 
 
+def set_thumbnail(video_id: str, thumbnail_path: str):
+    """Define uma thumbnail customizada para o video. Requer que o canal
+    esteja verificado (telefone) no YouTube, senao a API retorna 403."""
+    creds = get_credentials()
+    youtube = build("youtube", "v3", credentials=creds)
+    media = MediaFileUpload(thumbnail_path, mimetype="image/jpeg")
+    youtube.thumbnails().set(videoId=video_id, media_body=media).execute()
+    print(f"[OK] Thumbnail definida para {video_id}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--video-id", required=True, help="ID do video original (para achar os clipes gerados)")
