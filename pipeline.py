@@ -9,6 +9,7 @@ import analyze_highlights
 import cut_shorts
 import download
 import select_video
+import thumbnail
 import transcribe
 import upload_short
 from allowlist import assert_channel_authorized, get_channel_info
@@ -78,13 +79,23 @@ def run(video_id: str = None, publish: bool = True):
                 f"Assista na integra: {video_url}"
             ).strip()
             publish_at = _schedule_time(base_time, i)
-            upload_short.upload_short(
+            titulo = clip.get("titulo", f"Corte {i+1}")
+            uploaded_id = upload_short.upload_short(
                 clip_path,
-                clip.get("titulo", f"Corte {i+1}"),
+                titulo,
                 description,
                 tags=["shorts"],
                 publish_at=publish_at,
             )
+
+            thumb_path = f"thumbnails/{video_id}_{i}.jpg"
+            thumbnail.generate_thumbnail(clip_path, titulo, thumb_path)
+            try:
+                upload_short.set_thumbnail(uploaded_id, thumb_path)
+            except Exception as e:
+                # Nao derruba o pipeline se so a thumbnail falhar (ex: canal
+                # ainda nao verificado no YouTube) - o video ja foi publicado.
+                print(f"[AVISO] Falha ao definir thumbnail de {uploaded_id}: {e}")
     else:
         print("Publicacao pulada (--no-publish). Confira a pasta shorts/ antes de subir.")
 
