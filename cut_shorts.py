@@ -11,10 +11,15 @@ SHORTS_DIR = "shorts"
 ASSETS_DIR = "assets"
 LOGO_PATH = os.path.join(ASSETS_DIR, "logo.png")
 MUSIC_DIR = os.path.join(ASSETS_DIR, "musicas")
+FONTS_DIR = os.path.join(ASSETS_DIR, "fonts")  # deve conter Bangers-Regular.ttf
 
 MUSIC_VOLUME = 0.06        # 6% do volume original da musica de fundo
 WATERMARK_OPACITY = 0.35   # 0 a 1 - quanto menor, mais transparente a logo
 WATERMARK_WIDTH = 220      # largura da logo em pixels (video final tem 1080 de largura)
+
+WORDS_PER_CAPTION = 4       # no maximo N palavras exibidas por vez (estilo karaoke)
+SUBTITLE_FONT_NAME = "Bangers"
+SUBTITLE_FONT_SIZE = 64     # relativo a original_size=1080x1920 (ver nota abaixo)
 
 
 def _seconds_to_ts(seconds: float) -> str:
@@ -24,27 +29,71 @@ def _seconds_to_ts(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:06.3f}"
 
 
-def _build_srt(segments: list[dict], clip_start: float, clip_end: float, srt_path: str):
-    """Gera um .srt so com as falas dentro da janela do clipe, tempo relativo."""
-    def fmt(t):
-        ms = int((t % 1) * 1000)
-        h = int(t // 3600)
-        m = int((t % 3600) // 60)
-        s = int(t % 60)
-        return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+def _fmt_srt_time(t: float) -> str:
+    t = max(t, 0)
+    ms = int(round((t % 1) * 1000))
+    h = int(t // 3600)
+    m = int((t % 3600) // 60)
+    s = int(t % 60)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
-    lines = []
-    idx = 1
+
+def _collect_words(segments: list[dict], clip_start: float, clip_end: float) -> list[dict]:
+    """Junta as palavras (com timestamp) de todos os segmentos que caem
+    dentro da janela do clipe, com tempo relativo ao inicio do clipe.
+    Se um segmento nao tiver timestamps por palavra (ex: transcricao
+    antiga), distribui o texto uniformemente dentro da janela dele."""
+    words = []
     for seg in segments:
         if seg["end"] < clip_start or seg["start"] > clip_end:
             continue
-        rel_start = max(seg["start"], clip_start) - clip_start
-        rel_end = min(seg["end"], clip_end) - clip_start
+        seg_words = seg.get("words") or []
+        if seg_words:
+            for w in seg_words:
+                if w["end"] < clip_start or w["start"] > clip_end:
+                    continue
+                words.append({
+                    "start": max(w["start"], clip_start) - clip_start,
+                    "end": min(w["end"], clip_end) - clip_start,
+                    "text": w["word"].strip(),
+                })
+        else:
+            seg_start = max(seg["start"], clip_start)
+            seg_end = min(seg["end"], clip_end)
+            text_words = seg["text"].strip().split()
+            if not text_words:
+                continue
+            step = max(seg_end - seg_start, 0.01) / len(text_words)
+            for i, tw in enumerate(text_words):
+                words.append({
+                    "start": (seg_start + i * step) - clip_start,
+                    "end": (seg_start + (i + 1) * step) - clip_start,
+                    "text": tw,
+                })
+    words.sort(key=lambda w: w["start"])
+    return words
+
+
+def _build_srt(segments: list[dict], clip_start: float, clip_end: float, srt_path: str):
+    """Gera um .srt em blocos de poucas palavras (estilo karaoke/legenda
+    dinamica), em vez da frase inteira de uma vez."""
+    words = _collect_words(segments, clip_start, clip_end)
+
+    lines = []
+    idx = 1
+    for i in range(0, len(words), WORDS_PER_CAPTION):
+        chunk = [w for w in words[i:i + WORDS_PER_CAPTION] if w["text"]]
+        if not chunk:
+            continue
+        chunk_start = chunk[0]["start"]
+        chunk_end = max(chunk[-1]["end"], chunk_start + 0.2)
+        text = " ".join(w["text"] for w in chunk)
         lines.append(str(idx))
-        lines.append(f"{fmt(rel_start)} --> {fmt(rel_end)}")
-        lines.append(seg["text"].strip())
+        lines.append(f"{_fmt_srt_time(chunk_start)} --> {_fmt_srt_time(chunk_end)}")
+        lines.append(text)
         lines.append("")
         idx += 1
+
     with open(srt_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
@@ -72,11 +121,21 @@ def cut_clip(
     _build_srt(segments, start, end, srt_path)
     out_path = os.path.join(SHORTS_DIR, f"{video_id}_{index}.mp4")
 
-    # Legenda menor e centralizada verticalmente (Alignment=5 = meio-centro
-    # no padrao ASS/libass, em vez do padrao "colado embaixo").
+    # Notas sobre o estilo da legenda (pegadinhas do filtro "subtitles" do ffmpeg):
+    # - "original_size" precisa ser informado explicitamente com a resolucao
+    #   final (1080x1920), senao o filtro assume por padrao uma resolucao
+    #   antiga (384x288) e o Fontsize sai desproporcional/gigante.
+    # - Para centralizar verticalmente, o valor correto e Alignment=10
+    #   (nao 5 - a numeracao usada aqui e a antiga do SSA, nao a de teclado
+    #   numerico do ASS: 5/6/7 = topo, 9/10/11 = meio, 1/2/3 = base).
     subtitle_style = (
-        "Fontsize=14,PrimaryColour=&HFFFFFF&,OutlineColour=&H000000&,"
-        "BorderStyle=3,Alignment=5,MarginV=0"
+        f"FontName={SUBTITLE_FONT_NAME},Fontsize={SUBTITLE_FONT_SIZE},Bold=1,"
+        "PrimaryColour=&HFFFFFF&,OutlineColour=&H000000&,"
+        "BorderStyle=1,Outline=3,Shadow=0,Alignment=10,MarginV=0"
+    )
+    subtitles_filter = (
+        f"subtitles={srt_path}:original_size=1080x1920:"
+        f"fontsdir={FONTS_DIR}:force_style='{subtitle_style}'"
     )
 
     filter_parts = []
@@ -95,7 +154,7 @@ def cut_clip(
             "[0:v]crop='min(iw,ih*9/16)':'min(ih,iw*16/9)',scale=1080:1920[framed]"
         )
 
-    filter_parts.append(f"[framed]subtitles={srt_path}:force_style='{subtitle_style}'[vid]")
+    filter_parts.append(f"[framed]{subtitles_filter}[vid]")
     video_label = "vid"
 
     has_logo = os.path.exists(LOGO_PATH)
@@ -126,7 +185,6 @@ def cut_clip(
             f"colorchannelmixer=aa={WATERMARK_OPACITY}[logo]"
         )
         # centralizada horizontalmente, um pouco abaixo do centro do video
-        # (onde fica a legenda, que agora esta centralizada verticalmente)
         filter_parts.append(
             f"[{video_label}][logo]overlay=(main_w-overlay_w)/2:(main_h/2)+200[vout]"
         )
