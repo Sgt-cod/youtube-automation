@@ -1,7 +1,9 @@
 """Roda o pipeline completo para um video: download -> transcricao ->
 highlights -> cortes -> upload."""
 import argparse
+import json
 import os
+from datetime import datetime, timedelta, timezone
 
 import analyze_highlights
 import cut_shorts
@@ -9,7 +11,23 @@ import download
 import select_video
 import transcribe
 import upload_short
-from allowlist import assert_channel_authorized
+from allowlist import assert_channel_authorized, get_channel_info
+
+# 1o short publica na hora; os demais sao programados com esses offsets.
+SCHEDULE_OFFSETS_HOURS = [0, 2, 4]
+
+
+def _schedule_time(base_time: datetime, index: int) -> str | None:
+    """None = publica imediatamente. Caso contrario, retorna o horario
+    (ISO 8601 UTC) em que o YouTube deve publicar automaticamente."""
+    if index == 0:
+        return None
+    if index < len(SCHEDULE_OFFSETS_HOURS):
+        offset = SCHEDULE_OFFSETS_HOURS[index]
+    else:
+        # fallback caso um dia existam mais de 3 clipes: continua +2h a cada um
+        offset = SCHEDULE_OFFSETS_HOURS[-1] + 2 * (index - len(SCHEDULE_OFFSETS_HOURS) + 1)
+    return (base_time + timedelta(hours=offset)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def run(video_id: str = None, publish: bool = True):
@@ -25,6 +43,11 @@ def run(video_id: str = None, publish: bool = True):
 
     assert_channel_authorized(channel_id)
 
+    channel_info = get_channel_info(channel_id)
+    split_screen = bool(channel_info.get("split_screen", False))
+    channel_title = download.get_channel_title(channel_id, api_key)
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+
     print(f"== 1/5 Download: {video_id} ==")
     video_path = download.download_video(video_id)
 
@@ -32,7 +55,6 @@ def run(video_id: str = None, publish: bool = True):
     transcribe.transcribe(video_path, video_id)
 
     print("== 3/5 Analise de highlights (Gemini) ==")
-    import json
     with open(f"transcripts/{video_id}.json", encoding="utf-8") as f:
         segments = json.load(f)
     highlights = analyze_highlights.find_highlights_gemini(segments)
@@ -42,17 +64,26 @@ def run(video_id: str = None, publish: bool = True):
 
     print("== 4/5 Cortando clipes ==")
     for i, clip in enumerate(highlights):
-        cut_shorts.cut_clip(video_path, video_id, clip, i, segments)
+        cut_shorts.cut_clip(video_path, video_id, clip, i, segments, split_screen=split_screen)
 
     if publish:
         print("== 5/5 Publicando no YouTube ==")
+        base_time = datetime.now(timezone.utc)
         for i, clip in enumerate(highlights):
             clip_path = f"shorts/{video_id}_{i}.mp4"
+            motivo = clip.get("motivo", "")
+            description = (
+                f"{motivo}\n\n"
+                f"Video original: {channel_title}\n"
+                f"Assista na integra: {video_url}"
+            ).strip()
+            publish_at = _schedule_time(base_time, i)
             upload_short.upload_short(
                 clip_path,
                 clip.get("titulo", f"Corte {i+1}"),
-                clip.get("motivo", ""),
+                description,
                 tags=["shorts"],
+                publish_at=publish_at,
             )
     else:
         print("Publicacao pulada (--no-publish). Confira a pasta shorts/ antes de subir.")
