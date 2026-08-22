@@ -36,16 +36,24 @@ def run(video_id: str = None, publish: bool = True):
 
     if video_id:
         # video-id veio manual (workflow_dispatch): ainda precisa validar o canal
-        channel_id = download.get_video_channel_id(video_id, api_key)
+        details = download.get_video_details(video_id, api_key)
+        channel_id = details["channel_id"]
+        video_title = details["title"]
     else:
         print("== 0/5 Escolhendo video automaticamente ==")
-        video_id, channel_id = select_video.pick_video(api_key)
-        print(f"Selecionado: {video_id} (canal {channel_id})")
+        video_id, channel_id, video_title = select_video.pick_video(api_key)
+        print(f"Selecionado: {video_id} (canal {channel_id}) - {video_title}")
 
     assert_channel_authorized(channel_id)
 
     channel_info = get_channel_info(channel_id)
-    split_screen = bool(channel_info.get("split_screen", False))
+    # split_screen pode ser fixo pro canal inteiro (campo "split_screen": true)
+    # ou condicional a palavras no titulo do video (campo "split_screen_keywords":
+    # ["DEBATE", ...]), util para canais que misturam formatos diferentes.
+    keywords = [k.lower() for k in channel_info.get("split_screen_keywords", [])]
+    title_matches_keyword = any(k in video_title.lower() for k in keywords)
+    split_screen = bool(channel_info.get("split_screen", False)) or title_matches_keyword
+
     channel_title = download.get_channel_title(channel_id, api_key)
     video_url = f"https://www.youtube.com/watch?v={video_id}"
 
