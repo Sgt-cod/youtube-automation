@@ -123,6 +123,7 @@ def find_highlights_gemini(segments: list[dict]) -> list[dict]:
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
+                    max_output_tokens=4096,
                 ),
             )
             text = response.text.strip()
@@ -130,6 +131,14 @@ def find_highlights_gemini(segments: list[dict]) -> list[dict]:
             highlights = json.loads(text)
             highlights = [_enforce_duration(h, segments) for h in highlights]
             return _dedupe_highlights(highlights)
+        except json.JSONDecodeError as e:
+            # O Gemini as vezes devolve JSON truncado/invalido (ex: resposta
+            # cortada no limite de tokens). Tenta de novo antes de desistir.
+            print(f"[AVISO] Gemini retornou JSON invalido (tentativa {attempt+1}/3): {e}")
+            if attempt < 2:
+                time.sleep(5)
+                continue
+            raise
         except Exception as e:
             if "429" in str(e) and attempt < 2:
                 time.sleep(20)  # cota do free tier: espera e tenta de novo
