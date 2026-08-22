@@ -14,7 +14,7 @@ MUSIC_DIR = os.path.join(ASSETS_DIR, "musicas")
 FONTS_DIR = os.path.join(ASSETS_DIR, "fonts")  # deve conter Bangers-Regular.ttf
 
 MUSIC_VOLUME = 0.06        # 6% do volume original da musica de fundo
-WATERMARK_OPACITY = 0.35   # 0 a 1 - quanto menor, mais transparente a logo
+WATERMARK_OPACITY = 0.60   # 0 a 1 - quanto menor, mais transparente a logo
 WATERMARK_WIDTH = 220      # largura da logo em pixels (video final tem 1080 de largura)
 
 WORDS_PER_CAPTION = 4       # no maximo N palavras exibidas por vez (estilo karaoke)
