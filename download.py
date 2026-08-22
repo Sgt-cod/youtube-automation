@@ -21,6 +21,19 @@ def get_video_channel_id(video_id: str, api_key: str) -> str:
     return items[0]["snippet"]["channelId"]
 
 
+def get_video_details(video_id: str, api_key: str) -> dict:
+    """Retorna {'channel_id': ..., 'title': ...} numa unica chamada -
+    usado no fluxo manual (--video-id), onde ainda nao sabemos o canal
+    nem o titulo do video."""
+    youtube = build("youtube", "v3", developerKey=api_key)
+    resp = youtube.videos().list(part="snippet", id=video_id).execute()
+    items = resp.get("items", [])
+    if not items:
+        raise ValueError(f"Video {video_id} nao encontrado.")
+    snippet = items[0]["snippet"]
+    return {"channel_id": snippet["channelId"], "title": snippet.get("title", "")}
+
+
 def get_channel_title(channel_id: str, api_key: str) -> str:
     """Nome atual do canal, usado para credito na descricao do short."""
     youtube = build("youtube", "v3", developerKey=api_key)
