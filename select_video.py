@@ -6,7 +6,7 @@ import re
 
 from googleapiclient.discovery import build
 
-from allowlist import load_allowlist
+from allowlist import get_channel_info, load_allowlist
 
 PROCESSED_PATH = "processed_videos.json"
 
@@ -14,6 +14,9 @@ PROCESSED_PATH = "processed_videos.json"
 # garante que so peguemos videos longos (entrevistas, podcasts etc), nunca
 # um Short que o proprio canal ja publicou.
 MIN_SOURCE_DURATION_SECONDS = 240  # 4 minutos
+
+PLAYLIST_PAGE_SIZE = 50
+MAX_PLAYLIST_PAGES = 4  # ate 200 videos de profundidade por canal, se precisar
 
 _ISO8601_DURATION_RE = re.compile(
     r"P(?:(?P<days>\d+)D)?T?(?:(?P<hours>\d+)H)?(?:(?P<minutes>\d+)M)?(?:(?P<seconds>\d+)S)?"
@@ -56,33 +59,73 @@ def _get_uploads_playlist_id(youtube, channel_id: str) -> str:
     return items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
 
 
-def _get_recent_video_ids(youtube, uploads_playlist_id: str, max_results: int = 20) -> list:
-    resp = youtube.playlistItems().list(
-        part="contentDetails",
-        playlistId=uploads_playlist_id,
-        maxResults=max_results,
-    ).execute()
-    return [item["contentDetails"]["videoId"] for item in resp.get("items", [])]
+def _iter_playlist_pages(youtube, playlist_id: str, max_pages: int = MAX_PLAYLIST_PAGES):
+    """Gera paginas de video_ids na ordem retornada pela API (para a
+    playlist de uploads, isso e do mais recente para o mais antigo)."""
+    page_token = None
+    for _ in range(max_pages):
+        resp = youtube.playlistItems().list(
+            part="contentDetails",
+            playlistId=playlist_id,
+            maxResults=PLAYLIST_PAGE_SIZE,
+            pageToken=page_token,
+        ).execute()
+        video_ids = [item["contentDetails"]["videoId"] for item in resp.get("items", [])]
+        yield video_ids
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
 
 
-def _get_video_durations(youtube, video_ids: list) -> dict:
-    """Retorna {video_id: duracao_em_segundos}. A API do YouTube nao
-    diferencia 'Short' de 'video normal' diretamente - a duracao e o jeito
-    confiavel de filtrar Shorts (que vao ate 3 minutos)."""
-    durations = {}
+def _get_video_details_batch(youtube, video_ids: list) -> dict:
+    """Retorna {video_id: {"duration": segundos, "title": str}}."""
+    details = {}
     for i in range(0, len(video_ids), 50):  # videos.list aceita ate 50 ids por chamada
         batch = video_ids[i:i + 50]
-        resp = youtube.videos().list(part="contentDetails", id=",".join(batch)).execute()
+        resp = youtube.videos().list(part="contentDetails,snippet", id=",".join(batch)).execute()
         for item in resp.get("items", []):
-            durations[item["id"]] = _parse_iso8601_duration(item["contentDetails"]["duration"])
-    return durations
+            details[item["id"]] = {
+                "duration": _parse_iso8601_duration(item["contentDetails"]["duration"]),
+                "title": item["snippet"].get("title", ""),
+            }
+    return details
+
+
+def _find_candidate_in_channel(youtube, channel_id: str, processed: set):
+    """Procura, na playlist configurada do canal (ou nos uploads gerais se
+    nenhuma playlist especifica foi definida), o primeiro video que ainda
+    nao foi processado e que nao e um Short. Prioriza os mais recentes -
+    so vai mais fundo na playlist se os recentes ja tiverem sido usados."""
+    channel_info = get_channel_info(channel_id)
+    playlist_id = channel_info.get("playlist_id") or _get_uploads_playlist_id(youtube, channel_id)
+    if not playlist_id:
+        return None
+
+    for page_ids in _iter_playlist_pages(youtube, playlist_id):
+        if not page_ids:
+            continue
+        pending_ids = [v for v in page_ids if v not in processed]
+        if not pending_ids:
+            continue
+        details = _get_video_details_batch(youtube, pending_ids)
+        # mantem a ordem original da pagina (preferencia pelos mais recentes)
+        for video_id in page_ids:
+            if video_id not in pending_ids:
+                continue
+            info = details.get(video_id)
+            if not info or info["duration"] < MIN_SOURCE_DURATION_SECONDS:
+                continue
+            return video_id, info["title"]
+
+    return None
 
 
 def pick_video(api_key: str, max_attempts: int = 10) -> tuple:
-    """Sorteia um canal da allowlist e retorna (video_id, channel_id) de um
-    video LONGO recente ainda nao processado (Shorts sao descartados).
-    Levanta RuntimeError se nao achar nenhum candidato depois de
-    `max_attempts` tentativas."""
+    """Sorteia um canal da allowlist e retorna (video_id, channel_id,
+    video_title) de um video LONGO ainda nao processado, dando preferencia
+    aos mais recentes da playlist configurada para o canal (ou dos uploads
+    gerais, se nenhuma playlist especifica estiver configurada). Levanta
+    RuntimeError se nao achar nenhum candidato depois de `max_attempts`."""
     channel_ids = list(load_allowlist())
     if not channel_ids:
         raise RuntimeError("Allowlist vazia, adicione canais em channels_allowlist.json")
@@ -97,25 +140,10 @@ def pick_video(api_key: str, max_attempts: int = 10) -> tuple:
             break
         attempts += 1
 
-        uploads_id = _get_uploads_playlist_id(youtube, channel_id)
-        if not uploads_id:
-            continue
-
-        recent_ids = _get_recent_video_ids(youtube, uploads_id)
-        not_processed = [v for v in recent_ids if v not in processed]
-        if not not_processed:
-            continue
-
-        durations = _get_video_durations(youtube, not_processed)
-        candidates = [
-            v for v in not_processed
-            if durations.get(v, 0) >= MIN_SOURCE_DURATION_SECONDS
-        ]
-        if not candidates:
-            continue
-
-        video_id = random.choice(candidates)
-        return video_id, channel_id
+        found = _find_candidate_in_channel(youtube, channel_id, processed)
+        if found:
+            video_id, title = found
+            return video_id, channel_id, title
 
     raise RuntimeError(
         "Nao foi possivel achar um video longo novo em nenhum canal da "
