@@ -2,6 +2,7 @@
 import argparse
 import os
 import subprocess
+import time
 from dotenv import load_dotenv
 from googleapiclient.discovery import build
 from allowlist import assert_channel_authorized
@@ -49,26 +50,46 @@ def download_video(video_id: str) -> str:
     out_template = os.path.join(OUTPUT_DIR, f"{video_id}.%(ext)s")
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    cmd = [
-        "yt-dlp",
-        "-f", "bv*[height<=1080]+ba/b[height<=1080]",
-        "--merge-output-format", "mp4",
-        "--remote-components", "ejs:github",
-        "--force-ipv4",
-        "-o", out_template,
-    ]
+    # Falhas de rede aqui costumam ser especificas do servidor de CDN
+    # (googlevideo.com) que o YouTube atribui naquela tentativa: alguns so
+    # tem endereco IPv4, outros so IPv6, e o runner do GitHub Actions as
+    # vezes tem IPv6 "quebrado" (endereco existe mas nao roteia). Como nao
+    # da pra saber de antemao qual vai funcionar, tenta varias estrategias
+    # em sequencia - cada nova tentativa normalmente cai em outro servidor.
+    ip_strategies = [None, "--force-ipv4", "--force-ipv6"]
 
-    # Se houver cookies.txt (gerado a partir do secret YOUTUBE_COOKIES_TXT),
-    # usa para evitar o bloqueio "Sign in to confirm you're not a bot"
-    # que o YouTube costuma aplicar em IPs de datacenter (ex: GitHub Actions).
-    if os.path.exists(COOKIES_PATH):
-        cmd += ["--cookies", COOKIES_PATH]
+    last_error = None
+    for attempt, ip_flag in enumerate(ip_strategies, start=1):
+        cmd = [
+            "yt-dlp",
+            "-f", "bv*[height<=1080]+ba/b[height<=1080]",
+            "--merge-output-format", "mp4",
+            "--remote-components", "ejs:github",
+        ]
+        if ip_flag:
+            cmd.append(ip_flag)
 
-    cmd.append(url)
+        # Se houver cookies.txt (gerado a partir do secret YOUTUBE_COOKIES_TXT),
+        # usa para evitar o bloqueio "Sign in to confirm you're not a bot"
+        # que o YouTube costuma aplicar em IPs de datacenter (ex: GitHub Actions).
+        if os.path.exists(COOKIES_PATH):
+            cmd += ["--cookies", COOKIES_PATH]
 
-    subprocess.run(cmd, check=True)
-    expected_path = os.path.join(OUTPUT_DIR, f"{video_id}.mp4")
-    return expected_path
+        cmd += ["-o", out_template, url]
+
+        try:
+            subprocess.run(cmd, check=True)
+            return os.path.join(OUTPUT_DIR, f"{video_id}.mp4")
+        except subprocess.CalledProcessError as e:
+            last_error = e
+            estrategia = ip_flag or "padrao (sem forcar IP)"
+            print(
+                f"[AVISO] Download falhou na tentativa {attempt}/{len(ip_strategies)} "
+                f"(estrategia: {estrategia}). Tentando de novo..."
+            )
+            time.sleep(5)
+
+    raise last_error
 
 
 def main():
