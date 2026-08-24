@@ -17,6 +17,10 @@ from allowlist import assert_channel_authorized, get_channel_info
 # 1o short publica na hora; os demais sao programados com esses offsets.
 SCHEDULE_OFFSETS_HOURS = [0, 2, 4]
 
+# Se o video escolhido automaticamente falhar (ex: erro de rede persistente
+# no download), tenta ate esse numero de videos diferentes antes de desistir.
+MAX_VIDEO_ATTEMPTS = 3
+
 
 def _schedule_time(base_time: datetime, index: int) -> str | None:
     """None = publica imediatamente. Caso contrario, retorna o horario
@@ -31,19 +35,7 @@ def _schedule_time(base_time: datetime, index: int) -> str | None:
     return (base_time + timedelta(hours=offset)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def run(video_id: str = None, publish: bool = True):
-    api_key = os.environ["YOUTUBE_API_KEY"]
-
-    if video_id:
-        # video-id veio manual (workflow_dispatch): ainda precisa validar o canal
-        details = download.get_video_details(video_id, api_key)
-        channel_id = details["channel_id"]
-        video_title = details["title"]
-    else:
-        print("== 0/5 Escolhendo video automaticamente ==")
-        video_id, channel_id, video_title = select_video.pick_video(api_key)
-        print(f"Selecionado: {video_id} (canal {channel_id}) - {video_title}")
-
+def _process_video(video_id: str, channel_id: str, video_title: str, api_key: str, publish: bool):
     assert_channel_authorized(channel_id)
 
     channel_info = get_channel_info(channel_id)
@@ -108,6 +100,35 @@ def run(video_id: str = None, publish: bool = True):
         print("Publicacao pulada (--no-publish). Confira a pasta shorts/ antes de subir.")
 
     select_video.mark_processed(video_id)
+
+
+def run(video_id: str = None, publish: bool = True):
+    api_key = os.environ["YOUTUBE_API_KEY"]
+
+    if video_id:
+        # video-id veio manual (workflow_dispatch): roda uma vez so, sem
+        # trocar de video em caso de erro (o usuario pediu esse especifico).
+        details = download.get_video_details(video_id, api_key)
+        _process_video(video_id, details["channel_id"], details["title"], api_key, publish)
+        return
+
+    last_error = None
+    for attempt in range(1, MAX_VIDEO_ATTEMPTS + 1):
+        print(f"== 0/5 Escolhendo video automaticamente (tentativa {attempt}/{MAX_VIDEO_ATTEMPTS}) ==")
+        auto_video_id, channel_id, video_title = select_video.pick_video(api_key)
+        print(f"Selecionado: {auto_video_id} (canal {channel_id}) - {video_title}")
+        try:
+            _process_video(auto_video_id, channel_id, video_title, api_key, publish)
+            return
+        except Exception as e:
+            last_error = e
+            print(f"[AVISO] Falha processando {auto_video_id}: {e}")
+            print("Marcando como processado (para nao tentar de novo) e escolhendo outro video...")
+            select_video.mark_processed(auto_video_id)
+
+    raise RuntimeError(
+        f"Falhou em {MAX_VIDEO_ATTEMPTS} videos consecutivos. Ultimo erro: {last_error}"
+    ) from last_error
 
 
 def main():
