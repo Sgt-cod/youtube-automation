@@ -1,0 +1,106 @@
+name: Gerar corte longo (5-6 min) com thumbnail via Telegram
+
+on:
+  schedule:
+    - cron: "0 14 * * *"  # 11h Brasilia (UTC-3) - ajuste para quando voce puder mandar a thumbnail
+  workflow_dispatch:
+    inputs:
+      video_id:
+        description: "ID do video do YouTube (opcional)"
+        required: false
+      wait_minutes:
+        description: "Minutos esperando a thumbnail no Telegram (padrao 60)"
+        required: false
+
+permissions:
+  contents: write
+
+# Evita rodar dois jobs que commitam no repo ao mesmo tempo
+concurrency:
+  group: long-cut
+  cancel-in-progress: false
+
+jobs:
+  gerar-corte-longo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar ffmpeg
+        run: |
+          curl -L https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz -o ffmpeg.tar.xz
+          tar -xf ffmpeg.tar.xz
+          sudo mv ffmpeg-master-latest-linux64-gpl/bin/ffmpeg /usr/local/bin/
+          sudo mv ffmpeg-master-latest-linux64-gpl/bin/ffprobe /usr/local/bin/
+          rm -rf ffmpeg.tar.xz ffmpeg-master-latest-linux64-gpl
+          ffmpeg -version
+
+      - name: Instalar dependencias Python
+        run: pip install -r requirements.txt
+
+      - name: Instalar Deno (runtime JS exigido pelo yt-dlp)
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      - name: Atualizar yt-dlp para a ultima versao
+        run: pip install -U yt-dlp
+
+      - name: Gerar cookies.txt para o yt-dlp
+        env:
+          YOUTUBE_COOKIES_TXT: ${{ secrets.YOUTUBE_COOKIES_TXT }}
+        run: |
+          if [ -n "$YOUTUBE_COOKIES_TXT" ]; then
+            printf '%s' "$YOUTUBE_COOKIES_TXT" > cookies.txt
+            echo "cookies.txt gerado."
+          else
+            echo "Secret YOUTUBE_COOKIES_TXT nao configurado, seguindo sem cookies."
+          fi
+
+      - name: Rodar pipeline do corte longo
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          YOUTUBE_CREDENTIALS: ${{ secrets.YOUTUBE_CREDENTIALS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          THUMB_WAIT_MINUTES: ${{ github.event.inputs.wait_minutes || '60' }}
+          VIDEO_ID: ${{ github.event.inputs.video_id }}
+        run: |
+          if [ -n "$VIDEO_ID" ]; then
+            python pipeline_long.py --video-id "$VIDEO_ID"
+          else
+            python pipeline_long.py
+          fi
+
+      - name: Avisar falha no Telegram
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python telegram_bot.py --notify "❌ O corte longo de hoje falhou. Detalhes: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true
+
+      - name: Salvar historico de videos processados (corte longo)
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain processed_long.json)" ]; then
+            git add processed_long.json
+            git commit -m "chore: atualiza processed_long.json [skip ci]"
+            for i in 1 2 3; do
+              git pull --rebase && git push && break
+              sleep 5
+            done
+          else
+            echo "Nada novo para commitar."
+          fi
+
+# Secrets novos (Settings > Secrets and variables > Actions):
+# TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID

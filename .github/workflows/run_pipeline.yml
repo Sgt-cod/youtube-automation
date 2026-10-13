@@ -75,7 +75,11 @@ jobs:
           if [ -n "$(git status --porcelain processed_videos.json)" ]; then
             git add processed_videos.json
             git commit -m "chore: atualiza processed_videos.json [skip ci]"
-            git push
+            # pull --rebase: o workflow do corte longo tambem commita no repo
+            for i in 1 2 3; do
+              git pull --rebase && git push && break
+              sleep 5
+            done
           else
             echo "Nada novo para commitar."
           fi
