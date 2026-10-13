@@ -29,8 +29,10 @@ def _chat_id() -> str:
     return str(os.environ["TELEGRAM_CHAT_ID"]).strip()
 
 
-def _call(method: str, timeout: int = 30, **params) -> dict:
-    resp = requests.post(f"{API}/bot{_token()}/{method}", json=params, timeout=timeout)
+def _call(method: str, _http_timeout: int = 30, **params) -> dict:
+    # "timeout" em **params e parametro da API do Telegram (long polling),
+    # diferente do timeout HTTP do requests (_http_timeout).
+    resp = requests.post(f"{API}/bot{_token()}/{method}", json=params, timeout=_http_timeout)
     if resp.status_code == 409:
         raise RuntimeError(
             "Telegram retornou 409: o bot tem um webhook ativo (ou outro processo "
