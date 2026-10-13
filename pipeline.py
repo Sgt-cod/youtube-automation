@@ -59,6 +59,10 @@ def _process_video(video_id: str, channel_id: str, video_title: str, api_key: st
     with open(f"transcripts/{video_id}.json", encoding="utf-8") as f:
         segments = json.load(f)
     highlights = analyze_highlights.find_highlights_gemini(segments)
+    if not highlights:
+        # Com a verificacao de contexto, pode acontecer de todos os candidatos
+        # serem reprovados. Levantar erro faz o pipeline tentar outro video.
+        raise RuntimeError(f"Nenhum corte com contexto completo encontrado em {video_id}.")
     os.makedirs("highlights", exist_ok=True)
     with open(f"highlights/{video_id}.json", "w", encoding="utf-8") as f:
         json.dump(highlights, f, ensure_ascii=False, indent=2)

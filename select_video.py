@@ -36,18 +36,18 @@ def _parse_iso8601_duration(duration: str) -> int:
     return days * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
-def _load_processed() -> set:
+def _load_processed(path: str = PROCESSED_PATH) -> set:
     """IDs de videos ja cortados antes, para nao repetir."""
-    if not os.path.exists(PROCESSED_PATH):
+    if not os.path.exists(path):
         return set()
-    with open(PROCESSED_PATH, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8") as f:
         return set(json.load(f))
 
 
-def mark_processed(video_id: str):
-    processed = _load_processed()
+def mark_processed(video_id: str, path: str = PROCESSED_PATH):
+    processed = _load_processed(path)
     processed.add(video_id)
-    with open(PROCESSED_PATH, "w", encoding="utf-8") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(sorted(processed), f, ensure_ascii=False, indent=2)
 
 
@@ -91,7 +91,10 @@ def _get_video_details_batch(youtube, video_ids: list) -> dict:
     return details
 
 
-def _find_candidate_in_channel(youtube, channel_id: str, processed: set):
+def _find_candidate_in_channel(
+    youtube, channel_id: str, processed: set,
+    min_duration: int = MIN_SOURCE_DURATION_SECONDS,
+):
     """Procura, na playlist configurada do canal (ou nos uploads gerais se
     nenhuma playlist especifica foi definida), o primeiro video que ainda
     nao foi processado e que nao e um Short. Prioriza os mais recentes -
@@ -113,14 +116,19 @@ def _find_candidate_in_channel(youtube, channel_id: str, processed: set):
             if video_id not in pending_ids:
                 continue
             info = details.get(video_id)
-            if not info or info["duration"] < MIN_SOURCE_DURATION_SECONDS:
+            if not info or info["duration"] < min_duration:
                 continue
             return video_id, info["title"]
 
     return None
 
 
-def pick_video(api_key: str, max_attempts: int = 10) -> tuple:
+def pick_video(
+    api_key: str,
+    max_attempts: int = 10,
+    processed_path: str = PROCESSED_PATH,
+    min_duration: int = MIN_SOURCE_DURATION_SECONDS,
+) -> tuple:
     """Sorteia um canal da allowlist e retorna (video_id, channel_id,
     video_title) de um video LONGO ainda nao processado, dando preferencia
     aos mais recentes da playlist configurada para o canal (ou dos uploads
@@ -132,7 +140,7 @@ def pick_video(api_key: str, max_attempts: int = 10) -> tuple:
 
     random.shuffle(channel_ids)
     youtube = build("youtube", "v3", developerKey=api_key)
-    processed = _load_processed()
+    processed = _load_processed(processed_path)
 
     attempts = 0
     for channel_id in channel_ids:
@@ -140,7 +148,7 @@ def pick_video(api_key: str, max_attempts: int = 10) -> tuple:
             break
         attempts += 1
 
-        found = _find_candidate_in_channel(youtube, channel_id, processed)
+        found = _find_candidate_in_channel(youtube, channel_id, processed, min_duration)
         if found:
             video_id, title = found
             return video_id, channel_id, title
