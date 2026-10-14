@@ -21,12 +21,18 @@ Variaveis de ambiente opcionais:
                        MP4 nao guarda transparencia; sem isso a CTA aparece
                        como um retangulo.
   CTA_AUDIO            1 = mistura o som da CTA (padrao 0 = CTA muda)
+  LONG_MUSIC           0 = desliga a musica de fundo (padrao 1)
+  LONG_MUSIC_VOLUME    volume da musica (padrao = o mesmo dos shorts, 0.06)
+
+Musica de fundo: sorteada de assets/musicas/ (mesma pasta dos shorts), em
+loop se for menor que o corte. Toca so durante o corte principal, nao sobre a
+intro e o encerramento.
 """
 import json
 import os
 import subprocess
 
-from cut_shorts import LOGO_PATH, WATERMARK_OPACITY, _seconds_to_ts
+from cut_shorts import LOGO_PATH, MUSIC_VOLUME, WATERMARK_OPACITY, _pick_random_music, _seconds_to_ts
 
 LONG_DIR = "long"
 ASSETS_DIR = os.path.dirname(LOGO_PATH)
@@ -43,6 +49,8 @@ CTA_WIDTH = int(os.environ.get("CTA_WIDTH", 480))
 CTA_MARGIN = int(os.environ.get("CTA_MARGIN", 60))
 CTA_CHROMAKEY = os.environ.get("CTA_CHROMAKEY", "").strip()
 CTA_AUDIO = os.environ.get("CTA_AUDIO", "0") == "1"
+LONG_MUSIC = os.environ.get("LONG_MUSIC", "1") != "0"
+LONG_MUSIC_VOLUME = float(os.environ.get("LONG_MUSIC_VOLUME", MUSIC_VOLUME))
 
 FPS = 30
 FIT_1080 = (
@@ -92,6 +100,9 @@ def cut_long_clip(video_path: str, video_id: str, clip: dict) -> str:
     frame = add_input("-loop", "1", "-i", FRAME_PATH) if has_frame else None
     logo = add_input("-loop", "1", "-i", LOGO_PATH) if has_logo else None
     cta = add_input("-i", CTA_PATH) if has_cta else None
+    music_path = _pick_random_music() if LONG_MUSIC else None
+    # -stream_loop -1: repete a musica ate o fim do corte se ela for mais curta
+    music = add_input("-stream_loop", "-1", "-i", music_path) if music_path else None
 
     # ---------------- corte principal (video)
     if has_frame and FRAME_VIDEO_SCALE < 1.0:
@@ -123,6 +134,15 @@ def cut_long_clip(video_path: str, video_id: str, clip: dict) -> str:
     # ---------------- audio do corte principal
     parts.append(f"[{main}:a]{STEREO}[a0]")
     audio_label = "a0"
+
+    if music_path:
+        print(f"Musica de fundo: {os.path.basename(music_path)} (volume {LONG_MUSIC_VOLUME})")
+        parts.append(f"[{music}:a]{STEREO},volume={LONG_MUSIC_VOLUME}[bg]")
+        parts.append(
+            f"[{audio_label}][bg]amix=inputs=2:duration=first:"
+            "dropout_transition=0:normalize=0[a_music]"
+        )
+        audio_label = "a_music"
 
     # ---------------- CTA no meio do corte
     if has_cta:
