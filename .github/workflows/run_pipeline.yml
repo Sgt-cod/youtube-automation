@@ -10,6 +10,9 @@ on:
       video_id:
         description: "ID do video do YouTube"
         required: false
+      starts:
+        description: "Segundos em que cada corte deve COMECAR (exige o ID). Ex: 60, 120, 130, 156 ou 1:30, 2:05"
+        required: false
 
 permissions:
   contents: write
@@ -60,9 +63,16 @@ jobs:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           YOUTUBE_CREDENTIALS: ${{ secrets.YOUTUBE_CREDENTIALS }}
+          VIDEO_ID: ${{ github.event.inputs.video_id }}
+          STARTS: ${{ github.event.inputs.starts }}
         run: |
-          if [ -n "${{ github.event.inputs.video_id }}" ]; then
-            python pipeline.py --video-id "${{ github.event.inputs.video_id }}"
+          if [ -n "$VIDEO_ID" ] && [ -n "$STARTS" ]; then
+            python pipeline.py --video-id "$VIDEO_ID" --starts "$STARTS"
+          elif [ -n "$VIDEO_ID" ]; then
+            python pipeline.py --video-id "$VIDEO_ID"
+          elif [ -n "$STARTS" ]; then
+            echo "ERRO: para escolher os segundos de inicio, informe tambem o ID do video."
+            exit 1
           else
             python pipeline.py
           fi

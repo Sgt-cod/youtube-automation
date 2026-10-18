@@ -8,6 +8,9 @@ on:
       video_id:
         description: "ID do video do YouTube (opcional)"
         required: false
+      start:
+        description: "Segundo em que o corte deve COMECAR (exige o ID). Ex: 345 ou 5:45"
+        required: false
       wait_minutes:
         description: "Minutos esperando a thumbnail no Telegram (padrao 60)"
         required: false
@@ -71,9 +74,15 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           THUMB_WAIT_MINUTES: ${{ github.event.inputs.wait_minutes || '60' }}
           VIDEO_ID: ${{ github.event.inputs.video_id }}
+          START: ${{ github.event.inputs.start }}
         run: |
-          if [ -n "$VIDEO_ID" ]; then
+          if [ -n "$VIDEO_ID" ] && [ -n "$START" ]; then
+            python pipeline_long.py --video-id "$VIDEO_ID" --start "$START"
+          elif [ -n "$VIDEO_ID" ]; then
             python pipeline_long.py --video-id "$VIDEO_ID"
+          elif [ -n "$START" ]; then
+            echo "ERRO: para escolher o segundo de inicio, informe tambem o ID do video."
+            exit 1
           else
             python pipeline_long.py
           fi
