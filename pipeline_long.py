@@ -37,7 +37,7 @@ def _fmt_dur(seconds: float) -> str:
     return f"{m}min{s:02d}s"
 
 
-def _prepare(video_id: str, channel_id: str, api_key: str) -> dict:
+def _prepare(video_id: str, channel_id: str, api_key: str, start: float | None = None) -> dict:
     """Tudo ate ter o trecho escolhido. Levanta erro se algo falhar (o
     chamador tenta outro video)."""
     assert_channel_authorized(channel_id)
@@ -52,7 +52,11 @@ def _prepare(video_id: str, channel_id: str, api_key: str) -> dict:
         segments = json.load(f)
 
     print("== 3/5 Escolha do trecho longo (Gemini) ==")
-    highlights = analyze_highlights.find_long_highlight(segments)
+    if start is not None:
+        highlights = analyze_highlights.find_clips_from_starts(
+            segments, [start], analyze_highlights.LONG_CONFIG)
+    else:
+        highlights = analyze_highlights.find_long_highlight(segments)
     if not highlights:
         raise RuntimeError(f"Nenhum trecho longo com contexto completo em {video_id}.")
     os.makedirs("highlights", exist_ok=True)
@@ -133,8 +137,10 @@ def _publish(video_id: str, ctx: dict, publish: bool):
     telegram_bot.send_message(f"✅ {status}: {titulo}\n{link}\n{thumb_note}")
 
 
-def run(video_id: str = None, publish: bool = True):
+def run(video_id: str = None, publish: bool = True, start: float | None = None):
     api_key = os.environ["YOUTUBE_API_KEY"]
+    if start is not None and not video_id:
+        raise ValueError("Informar o segundo de inicio exige tambem o ID do video.")
     if publish:
         for var in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
             if not os.environ.get(var):
@@ -142,7 +148,7 @@ def run(video_id: str = None, publish: bool = True):
 
     if video_id:
         details = download.get_video_details(video_id, api_key)
-        ctx = _prepare(video_id, details["channel_id"], api_key)
+        ctx = _prepare(video_id, details["channel_id"], api_key, start)
         _publish(video_id, ctx, publish)
         select_video.mark_processed(video_id, PROCESSED_LONG_PATH)
         return
@@ -177,9 +183,16 @@ def run(video_id: str = None, publish: bool = True):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--video-id", default=None, help="ID do video (opcional)")
+    parser.add_argument("--start", default=None, help="segundo em que o corte deve comecar (exige --video-id), ex: 345 ou 5:45")
     parser.add_argument("--no-publish", action="store_true", help="gera o corte mas nao usa Telegram/YouTube")
     args = parser.parse_args()
-    run(args.video_id, publish=not args.no_publish)
+    start = None
+    if args.start:
+        values = analyze_highlights.parse_start_seconds(args.start)
+        if len(values) != 1:
+            raise ValueError("No corte longo informe apenas UM segundo de inicio.")
+        start = values[0]
+    run(args.video_id, publish=not args.no_publish, start=start)
 
 
 if __name__ == "__main__":

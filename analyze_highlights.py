@@ -207,15 +207,18 @@ def _format_transcript(segments: list[dict]) -> str:
     )
 
 
-def _snap_to_sentences(s: int, e: int, segments: list[dict], cfg: ClipConfig) -> tuple[int, int]:
+def _snap_to_sentences(
+    s: int, e: int, segments: list[dict], cfg: ClipConfig, lock_start: bool = False,
+) -> tuple[int, int]:
     """Ajusta indices para o corte comecar no inicio de uma frase e terminar
-    no fim de uma frase, respeitando o limite absoluto de duracao."""
+    no fim de uma frase, respeitando o limite absoluto de duracao.
+    lock_start=True: o inicio foi escolhido pelo usuario e nao pode mudar."""
     last = len(segments) - 1
     s = max(0, min(s, last))
     e = max(s, min(e, last))
 
     # inicio: se o segmento anterior nao fechou frase, o atual e continuacao
-    for _ in range(4):
+    for _ in range(0 if lock_start else 4):
         if s > 0 and not _is_sentence_end(segments[s - 1]) \
                 and _span(segments, s - 1, e) <= cfg.hard_max_s:
             s -= 1
@@ -238,7 +241,7 @@ def _snap_to_sentences(s: int, e: int, segments: list[dict], cfg: ClipConfig) ->
             e += 1
         if _span(segments, s, e) > cfg.hard_max_s:
             break
-    while _span(segments, s, e) < cfg.min_s and s > 0:
+    while not lock_start and _span(segments, s, e) < cfg.min_s and s > 0:
         s -= 1
         while s > 0 and not _is_sentence_end(segments[s - 1]) \
                 and _span(segments, s - 1, e) <= cfg.hard_max_s:
@@ -311,6 +314,107 @@ def _verify(s: int, e: int, segments: list[dict], cfg: ClipConfig):
         return True, s, e, ""
 
 
+# ---------------------------------------------------------------- inicio escolhido pelo usuario
+
+END_PROMPT = """Voce e um editor de video. O usuario escolheu manualmente ONDE O CORTE COMECA:
+o segmento marcado com >> . O inicio e FIXO, nao mude. Sua tarefa e escolher onde
+o corte TERMINA (end_idx) e dar um titulo.
+Formato das linhas: [indice|tempo_em_segundos] texto.
+
+{rules}
+Responda SOMENTE com JSON:
+{{"end_idx": N, "titulo": "titulo curto e chamativo", "motivo": "descricao de 1-3 frases do que acontece no trecho", "arco": "..."}}
+end_idx deve ser >= {start_idx} e aparecer na lista abaixo.
+
+Trecho:
+{block}
+"""
+
+
+def parse_start_seconds(text: str) -> list[float]:
+    """'60, 120 130; 1:56 1:02:03' -> [60.0, 120.0, 130.0, 116.0, 3723.0].
+    Aceita virgula, ponto e virgula, espaco ou quebra de linha; mm:ss e hh:mm:ss."""
+    values = []
+    for tok in re.split(r"[,;\s]+", (text or "").strip()):
+        if not tok:
+            continue
+        try:
+            secs = 0.0
+            for part in tok.split(":"):
+                secs = secs * 60 + float(part.replace(",", "."))
+        except ValueError:
+            raise ValueError(f"Segundo invalido: '{tok}'. Use numeros, ex: 60, 120, 130 (ou 1:30).")
+        values.append(secs)
+    return values
+
+
+def _locate_start(t: float, segments: list[dict]):
+    """Acha (indice_do_segmento, tempo_exato_de_inicio) para o segundo t.
+    O corte comeca na primeira palavra que inicia a partir de t (com 0.4s de
+    tolerancia), que e o que o usuario esta vendo no player."""
+    for i, seg in enumerate(segments):
+        if seg["end"] <= t - 0.4:
+            continue
+        for w in seg.get("words", []):
+            if w["start"] >= t - 0.4:
+                return i, w["start"]
+        if seg["start"] >= t - 0.4:
+            return i, seg["start"]
+    return None
+
+
+def _fallback_end(s: int, segments: list[dict], cfg: ClipConfig) -> int:
+    e = s
+    while e < len(segments) - 1 and _span(segments, s, e) < cfg.min_s:
+        e += 1
+    return e
+
+
+def find_clips_from_starts(segments: list[dict], starts: list[float], cfg: ClipConfig) -> list[dict]:
+    """Um corte para cada segundo informado pelo usuario. O inicio e respeitado;
+    o Gemini escolhe apenas onde terminar para fechar a ideia."""
+    rules = RULES.format(min_s=cfg.min_s, max_s=cfg.max_s, hard_max_s=cfg.hard_max_s)
+    clips = []
+    for t in starts:
+        found = _locate_start(t, segments)
+        if not found:
+            print(f"[AVISO] Segundo {t:g} nao tem fala (depois do fim do video ou sem transcricao); ignorado.")
+            continue
+        s_idx, start_time = found
+
+        # janela: do inicio ate hard_max + folga, para o Gemini ver o fechamento
+        hi = s_idx
+        while hi < len(segments) - 1 and segments[hi]["end"] - start_time < cfg.hard_max_s + 40:
+            hi += 1
+        lines = [
+            f"{'>> ' if i == s_idx else '   '}[{i}|{segments[i]['start']:.0f}] {segments[i]['text']}"
+            for i in range(s_idx, hi + 1)
+        ]
+        raw = {}
+        try:
+            raw = _call_gemini_json(END_PROMPT.format(
+                rules=rules, start_idx=s_idx, block="\n".join(lines)))
+            if isinstance(raw, list):
+                raw = raw[0]
+            e = max(s_idx, min(int(raw["end_idx"]), hi))
+        except Exception as exc:
+            print(f"[AVISO] Gemini nao definiu o fim do corte em {t:g}s ({exc}); usando fim por frase.")
+            raw = {"titulo": f"Corte aos {int(t)}s"}
+            e = _fallback_end(s_idx, segments, cfg)
+
+        _, e = _snap_to_sentences(s_idx, e, segments, cfg, lock_start=True)
+        clip = _build_clip(raw, s_idx, e, segments)
+        clip["start"] = round(max(start_time - START_PAD, 0.0), 2)
+        clip["start_requested"] = t
+        if not clip["titulo"]:
+            clip["titulo"] = f"Corte aos {int(t)}s"
+        dur = clip["end"] - clip["start"]
+        print(f"[OK] Corte a partir de {t:g}s -> {clip['start']:.1f}s a {clip['end']:.1f}s ({dur:.0f}s): {clip['titulo']}")
+        clips.append(clip)
+        time.sleep(1)
+    return clips
+
+
 # ---------------------------------------------------------------- API principal
 
 def find_highlights(segments: list[dict], cfg: ClipConfig) -> list[dict]:
@@ -373,10 +477,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--video-id", required=True)
     parser.add_argument("--long", action="store_true", help="modo corte longo (5-6 min)")
+    parser.add_argument("--starts", default=None, help="segundos de inicio escolhidos, ex: \"60,120,130\"")
     args = parser.parse_args()
     with open(f"transcripts/{args.video_id}.json", "r", encoding="utf-8") as f:
         segments = json.load(f)
-    highlights = find_long_highlight(segments) if args.long else find_highlights_gemini(segments)
+    cfg = LONG_CONFIG if args.long else SHORT_CONFIG
+    if args.starts:
+        highlights = find_clips_from_starts(segments, parse_start_seconds(args.starts), cfg)
+    else:
+        highlights = find_highlights(segments, cfg)
     os.makedirs(HIGHLIGHTS_DIR, exist_ok=True)
     out_path = os.path.join(HIGHLIGHTS_DIR, f"{args.video_id}.json")
     with open(out_path, "w", encoding="utf-8") as f:

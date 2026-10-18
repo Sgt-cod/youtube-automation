@@ -35,7 +35,10 @@ def _schedule_time(base_time: datetime, index: int) -> str | None:
     return (base_time + timedelta(hours=offset)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _process_video(video_id: str, channel_id: str, video_title: str, api_key: str, publish: bool):
+def _process_video(
+    video_id: str, channel_id: str, video_title: str, api_key: str, publish: bool,
+    starts: list[float] | None = None,
+):
     assert_channel_authorized(channel_id)
 
     channel_info = get_channel_info(channel_id)
@@ -58,7 +61,12 @@ def _process_video(video_id: str, channel_id: str, video_title: str, api_key: st
     print("== 3/5 Analise de highlights (Gemini) ==")
     with open(f"transcripts/{video_id}.json", encoding="utf-8") as f:
         segments = json.load(f)
-    highlights = analyze_highlights.find_highlights_gemini(segments)
+    if starts:
+        # Inicio escolhido pelo usuario: o Gemini so decide onde terminar.
+        highlights = analyze_highlights.find_clips_from_starts(
+            segments, starts, analyze_highlights.SHORT_CONFIG)
+    else:
+        highlights = analyze_highlights.find_highlights_gemini(segments)
     if not highlights:
         # Com a verificacao de contexto, pode acontecer de todos os candidatos
         # serem reprovados. Levantar erro faz o pipeline tentar outro video.
@@ -106,14 +114,16 @@ def _process_video(video_id: str, channel_id: str, video_title: str, api_key: st
     select_video.mark_processed(video_id)
 
 
-def run(video_id: str = None, publish: bool = True):
+def run(video_id: str = None, publish: bool = True, starts: list[float] | None = None):
     api_key = os.environ["YOUTUBE_API_KEY"]
+    if starts and not video_id:
+        raise ValueError("Informar os segundos de inicio exige tambem o ID do video.")
 
     if video_id:
         # video-id veio manual (workflow_dispatch): roda uma vez so, sem
         # trocar de video em caso de erro (o usuario pediu esse especifico).
         details = download.get_video_details(video_id, api_key)
-        _process_video(video_id, details["channel_id"], details["title"], api_key, publish)
+        _process_video(video_id, details["channel_id"], details["title"], api_key, publish, starts)
         return
 
     last_error = None
@@ -144,9 +154,16 @@ def main():
         help="ID do video (opcional). Se omitido, escolhe automaticamente um "
         "video recente de um canal aleatorio da allowlist.",
     )
+    parser.add_argument(
+        "--starts",
+        default=None,
+        help="Segundos em que cada corte deve COMECAR, ex: \"60,120,130\" ou \"1:30 2:05\". "
+        "Exige --video-id. O fim de cada corte e escolhido pela IA.",
+    )
     parser.add_argument("--no-publish", action="store_true", help="gera os clipes mas nao publica")
     args = parser.parse_args()
-    run(args.video_id, publish=not args.no_publish)
+    starts = analyze_highlights.parse_start_seconds(args.starts) if args.starts else None
+    run(args.video_id, publish=not args.no_publish, starts=starts)
 
 
 if __name__ == "__main__":
