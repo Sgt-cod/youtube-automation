@@ -11,6 +11,9 @@ on:
       start:
         description: "Segundo em que o corte deve COMECAR (exige o ID). Ex: 345 ou 5:45"
         required: false
+      audio_wait_minutes:
+        description: "Minutos esperando o AUDIO de comentario no Telegram (padrao 15)"
+        required: false
       wait_minutes:
         description: "Minutos esperando a thumbnail no Telegram (padrao 60)"
         required: false
@@ -72,6 +75,7 @@ jobs:
           YOUTUBE_CREDENTIALS: ${{ secrets.YOUTUBE_CREDENTIALS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          AUDIO_WAIT_MINUTES: ${{ github.event.inputs.audio_wait_minutes || '15' }}
           THUMB_WAIT_MINUTES: ${{ github.event.inputs.wait_minutes || '60' }}
           VIDEO_ID: ${{ github.event.inputs.video_id }}
           START: ${{ github.event.inputs.start }}
