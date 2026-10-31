@@ -10,6 +10,12 @@ Arquivos opcionais em assets/ (se nao existir, simplesmente nao e aplicado):
                     do corte (a intro nao conta no calculo da metade)
 
 Ordem das camadas no corte: video -> moldura -> logo -> CTA.
+
+Previa com comentario (opcional, quando voce envia um audio no Telegram):
+  [previa P&B com o SEU audio] -> intro -> corte completo -> encerramento
+A previa e um trecho do proprio corte (do tamanho do audio), em preto e
+branco, com o som original MUDO e o seu audio no lugar. Recebe moldura e logo
+(e imagem do conteudo original), nao recebe musica nem CTA.
 Intro e encerramento ficam em tela cheia, sem moldura nem logo.
 
 Variaveis de ambiente opcionais:
@@ -23,6 +29,8 @@ Variaveis de ambiente opcionais:
   CTA_AUDIO            1 = mistura o som da CTA (padrao 0 = CTA muda)
   LONG_MUSIC           0 = desliga a musica de fundo (padrao 1)
   LONG_MUSIC_VOLUME    volume da musica (padrao = o mesmo dos shorts, 0.06)
+
+  PREVIEW_MAX_SECONDS  duracao maxima da previa/audio (padrao 90)
 
 Musica de fundo: sorteada de assets/musicas/ (mesma pasta dos shorts), em
 loop se for menor que o corte. Toca so durante o corte principal, nao sobre a
@@ -51,6 +59,7 @@ CTA_CHROMAKEY = os.environ.get("CTA_CHROMAKEY", "").strip()
 CTA_AUDIO = os.environ.get("CTA_AUDIO", "0") == "1"
 LONG_MUSIC = os.environ.get("LONG_MUSIC", "1") != "0"
 LONG_MUSIC_VOLUME = float(os.environ.get("LONG_MUSIC_VOLUME", MUSIC_VOLUME))
+PREVIEW_MAX_SECONDS = float(os.environ.get("PREVIEW_MAX_SECONDS", 90))
 
 FPS = 30
 FIT_1080 = (
@@ -72,7 +81,15 @@ def _probe(path: str) -> tuple[float, bool]:
     return float(data["format"]["duration"]), has_audio
 
 
-def cut_long_clip(video_path: str, video_id: str, clip: dict) -> str:
+def cut_long_clip(
+    video_path: str,
+    video_id: str,
+    clip: dict,
+    preview_audio: str | None = None,
+    preview_offset: float = 0.0,
+) -> str:
+    """preview_audio: audio do comentario introdutorio (opcional).
+    preview_offset: segundo DENTRO do corte onde a previa comeca (padrao 0)."""
     os.makedirs(LONG_DIR, exist_ok=True)
     start, end = clip["start"], clip["end"]
     main_dur = end - start
@@ -103,6 +120,18 @@ def cut_long_clip(video_path: str, video_id: str, clip: dict) -> str:
     music_path = _pick_random_music() if LONG_MUSIC else None
     # -stream_loop -1: repete a musica ate o fim do corte se ela for mais curta
     music = add_input("-stream_loop", "-1", "-i", music_path) if music_path else None
+
+    # previa: trecho do proprio corte, do tamanho do audio enviado
+    pv = pa = pframe = plogo = None
+    if preview_audio:
+        adur, _ = _probe(preview_audio)
+        adur = min(adur, PREVIEW_MAX_SECONDS, main_dur)
+        off = max(0.0, min(float(preview_offset), main_dur - adur))
+        print(f"Previa: {adur:.1f}s do corte, a partir de {off:.1f}s dentro dele")
+        pv = add_input("-ss", _seconds_to_ts(start + off), "-t", f"{adur:.3f}", "-i", video_path)
+        pa = add_input("-t", f"{adur:.3f}", "-i", preview_audio)
+        pframe = add_input("-loop", "1", "-i", FRAME_PATH) if has_frame else None
+        plogo = add_input("-loop", "1", "-i", LOGO_PATH) if has_logo else None
 
     # ---------------- corte principal (video)
     if has_frame and FRAME_VIDEO_SCALE < 1.0:
@@ -172,6 +201,32 @@ def cut_long_clip(video_path: str, video_id: str, clip: dict) -> str:
     # ---------------- intro / encerramento + concatenacao
     segments = []  # (video_label, audio_label) na ordem final
 
+    if preview_audio:
+        # video em preto e branco; audio original descartado (nem e mapeado)
+        parts.append(f"[{pv}:v]{fit},fps={FPS},hue=s=0[pv0]")
+        plabel = "pv0"
+        if has_frame:
+            parts.append(f"[{pframe}:v]scale=1920:1080,format=rgba[pmoldura]")
+            parts.append(f"[{plabel}][pmoldura]overlay=0:0:shortest=1[pv1]")
+            plabel = "pv1"
+        if has_logo:
+            parts.append(
+                f"[{plogo}:v]scale={LONG_WATERMARK_WIDTH}:-1,format=rgba,"
+                f"colorchannelmixer=aa={WATERMARK_OPACITY}[plogo]"
+            )
+            parts.append(
+                f"[{plabel}][plogo]overlay=main_w-overlay_w-{LONG_WATERMARK_MARGIN}:"
+                f"{LONG_WATERMARK_MARGIN}:shortest=1[pv2]"
+            )
+            plabel = "pv2"
+        parts.append(f"[{plabel}]format=yuv420p[vpreview]")
+        # loudnorm iguala o volume da sua voz ao do corte; apad/atrim travam a duracao
+        parts.append(
+            f"[{pa}:a]{STEREO},loudnorm=I=-16:TP=-1.5:LRA=11,{STEREO},"
+            f"apad=whole_dur={adur:.3f},atrim=duration={adur:.3f},asetpts=N/SR/TB[apreview]"
+        )
+        segments.append(("vpreview", "apreview"))
+
     def add_bumper(idx: int, path: str, name: str):
         dur, has_audio = _probe(path)
         parts.append(f"[{idx}:v]{FIT_1080},fps={FPS},format=yuv420p[v_{name}]")
@@ -206,4 +261,14 @@ def cut_long_clip(video_path: str, video_id: str, clip: dict) -> str:
         out_path,
     ]
     subprocess.run(cmd, check=True)
+    return out_path
+
+
+def extract_frame(video_path: str, out_path: str, at_seconds: float) -> str:
+    """Extrai 1 frame (1280x720, JPEG) para usar de thumbnail automatica."""
+    subprocess.run(
+        ["ffmpeg", "-y", "-ss", f"{at_seconds:.2f}", "-i", video_path,
+         "-frames:v", "1", "-vf", "scale=1280:720", "-q:v", "2", out_path],
+        check=True, capture_output=True,
+    )
     return out_path

@@ -1,6 +1,7 @@
 """
-Interacao com o Telegram para o corte longo: o pipeline avisa que o video esta
-pronto e ESPERA voce mandar a thumbnail (foto ou arquivo de imagem).
+Interacao com o Telegram para o corte longo: o pipeline avisa o contexto do
+corte e ESPERA voce mandar (1) um audio de comentario introdutorio, opcional, e
+(2) a thumbnail (foto ou arquivo de imagem).
 
 Variaveis de ambiente (secrets do GitHub):
   TELEGRAM_BOT_TOKEN  token do bot (BotFather)
@@ -58,19 +59,43 @@ def _flush_updates() -> int:
     return updates[-1]["update_id"] + 1 if updates else 0
 
 
-def _extract_image_file_id(msg: dict) -> str | None:
+# Estado da sessao: offset de leitura + midias que chegaram "adiantadas"
+# (ex: voce mandou a thumbnail enquanto o bot ainda esperava o audio).
+_state = {"offset": None, "stash": {}}
+
+
+def start_session() -> int:
+    """Chame ANTES de enviar a primeira mensagem do bot."""
+    _state["offset"] = _flush_updates()
+    _state["stash"] = {}
+    return _state["offset"]
+
+
+def _classify(msg: dict):
+    """Retorna (tipo, file_id, extensao) ou None. tipo: 'image' | 'audio'."""
     if msg.get("photo"):
-        return max(msg["photo"], key=lambda p: p.get("file_size", 0) or p["width"] * p["height"])["file_id"]
+        best = max(msg["photo"], key=lambda p: p.get("file_size", 0) or p["width"] * p["height"])
+        return "image", best["file_id"], ".jpg"
+    if msg.get("voice"):
+        return "audio", msg["voice"]["file_id"], ".ogg"
+    if msg.get("audio"):
+        name = msg["audio"].get("file_name") or ""
+        return "audio", msg["audio"]["file_id"], os.path.splitext(name)[1] or ".mp3"
     doc = msg.get("document")
-    if doc and str(doc.get("mime_type", "")).startswith("image/"):
-        return doc["file_id"]
+    if doc:
+        mime = str(doc.get("mime_type", ""))
+        ext = os.path.splitext(doc.get("file_name") or "")[1]
+        if mime.startswith("image/"):
+            return "image", doc["file_id"], ext or ".jpg"
+        if mime.startswith("audio/"):
+            return "audio", doc["file_id"], ext or ".mp3"
     return None
 
 
 def _download_file(file_id: str, out_path: str):
     info = _call("getFile", file_id=file_id)
     url = f"{API}/file/bot{_token()}/{info['file_path']}"
-    resp = requests.get(url, timeout=60)
+    resp = requests.get(url, timeout=120)
     resp.raise_for_status()
     with open(out_path, "wb") as f:
         f.write(resp.content)
@@ -95,38 +120,6 @@ def normalize_thumbnail(path: str) -> str:
     return out
 
 
-def wait_for_thumbnail(out_path: str, timeout_minutes: int, offset: int | None = None) -> str:
-    """Espera ate `timeout_minutes` por uma imagem do seu chat.
-    Retorna:
-      'image'   -> imagem baixada e normalizada (caminho em out_path)
-      'skip'    -> voce mandou 'pular' (publicar sem thumbnail personalizada)
-      'timeout' -> ninguem respondeu a tempo
-    Passe o `offset` obtido de start_session() para ignorar mensagens antigas."""
-    if offset is None:
-        offset = _flush_updates()
-    chat = _chat_id()
-    deadline = time.time() + timeout_minutes * 60
-    while time.time() < deadline:
-        wait = int(min(25, max(1, deadline - time.time())))
-        updates = _get_updates(offset, wait)
-        for upd in updates:
-            offset = upd["update_id"] + 1
-            msg = upd.get("message") or {}
-            if str(msg.get("chat", {}).get("id")) != chat:
-                continue  # ignora qualquer outra pessoa
-            file_id = _extract_image_file_id(msg)
-            if file_id:
-                raw = out_path + ".raw"
-                _download_file(file_id, raw)
-                final = normalize_thumbnail(raw)
-                os.replace(final, out_path)
-                os.remove(raw)
-                return "image"
-            if str(msg.get("text", "")).strip().lower() in SKIP_WORDS:
-                return "skip"
-    return "timeout"
-
-
 def _get_updates(offset: int, wait: int) -> list:
     resp = requests.post(
         f"{API}/bot{_token()}/getUpdates",
@@ -141,9 +134,65 @@ def _get_updates(offset: int, wait: int) -> list:
     return data["result"]
 
 
-def start_session() -> int:
-    """Chame ANTES de enviar o aviso; devolve o offset para wait_for_thumbnail."""
-    return _flush_updates()
+def _wait_media(want: str, timeout_minutes: float):
+    """Espera uma midia do tipo `want` ('image' ou 'audio') vinda do SEU chat.
+    Retorna ('media', (file_id, ext, legenda)) | ('skip', None) | ('timeout', None).
+    Midia do outro tipo que chegar nesse meio tempo fica guardada para a
+    proxima espera."""
+    stash = _state["stash"]
+    if want in stash:
+        return "media", stash.pop(want)
+    if _state["offset"] is None:
+        start_session()
+    chat = _chat_id()
+    deadline = time.time() + timeout_minutes * 60
+    while time.time() < deadline:
+        wait = int(min(25, max(1, deadline - time.time())))
+        for upd in _get_updates(_state["offset"], wait):
+            _state["offset"] = upd["update_id"] + 1
+            msg = upd.get("message") or {}
+            if str(msg.get("chat", {}).get("id")) != chat:
+                continue  # ignora qualquer outra pessoa
+            media = _classify(msg)
+            if media:
+                kind, file_id, ext = media
+                item = (file_id, ext, msg.get("caption", "") or "")
+                if kind == want:
+                    return "media", item
+                stash[kind] = item
+            elif str(msg.get("text", "")).strip().lower() in SKIP_WORDS:
+                return "skip", None
+    return "timeout", None
+
+
+def wait_for_audio(out_base: str, timeout_minutes: float):
+    """Espera o audio do comentario introdutorio (mensagem de voz, audio ou
+    arquivo de audio). Retorna (status, caminho_do_arquivo, legenda), com
+    status 'audio' | 'skip' | 'timeout'."""
+    status, item = _wait_media("audio", timeout_minutes)
+    if status != "media":
+        return status, None, ""
+    file_id, ext, caption = item
+    path = out_base + ext
+    _download_file(file_id, path)
+    return "audio", path, caption
+
+
+def wait_for_thumbnail(out_path: str, timeout_minutes: float, offset: int | None = None) -> str:
+    """Espera ate `timeout_minutes` por uma imagem do seu chat.
+    Retorna 'image' (salva e normalizada em out_path) | 'skip' | 'timeout'."""
+    if offset is not None:
+        _state["offset"] = offset
+    status, item = _wait_media("image", timeout_minutes)
+    if status != "media":
+        return status
+    file_id, _ext, _caption = item
+    raw = out_path + ".raw"
+    _download_file(file_id, raw)
+    final = normalize_thumbnail(raw)
+    os.replace(final, out_path)
+    os.remove(raw)
+    return "image"
 
 
 def main():
