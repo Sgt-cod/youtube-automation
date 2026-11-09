@@ -31,6 +31,7 @@ load_dotenv()
 
 HIGHLIGHTS_DIR = "highlights"
 MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+GEMINI_API_VERSION = os.environ.get("GEMINI_API_VERSION", "v1beta")
 
 START_PAD = 0.15  # folga (s) antes da primeira palavra
 END_PAD = 0.40    # folga (s) depois da ultima palavra (sem invadir o proximo segmento)
@@ -161,7 +162,12 @@ Trecho:
 def _call_gemini_json(prompt: str):
     """Chama o Gemini e devolve o JSON parseado, com retry para JSON invalido,
     limite de cota (429) e sobrecarga (500/503)."""
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    # Fixa v1beta: o modo JSON (response_mime_type) nao existe na v1, que passou a ser
+    # o padrao no google-genai 3.x ("JSON mode is not enabled for api version v1").
+    client = genai.Client(
+        api_key=os.environ["GEMINI_API_KEY"],
+        http_options=types.HttpOptions(api_version=GEMINI_API_VERSION),
+    )
     attempts = 4
     for attempt in range(attempts):
         try:
