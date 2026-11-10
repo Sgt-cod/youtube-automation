@@ -84,8 +84,14 @@ def _get_video_details_batch(youtube, video_ids: list) -> dict:
         batch = video_ids[i:i + 50]
         resp = youtube.videos().list(part="contentDetails,snippet", id=",".join(batch)).execute()
         for item in resp.get("items", []):
+            # Lives em andamento e estreias agendadas nao tem "duration" na API
+            # (KeyError); alem disso ainda nao da para baixar/cortar. Pula.
+            live_state = item.get("snippet", {}).get("liveBroadcastContent", "none")
+            duration_iso = item.get("contentDetails", {}).get("duration")
+            if live_state in ("live", "upcoming") or not duration_iso:
+                continue
             details[item["id"]] = {
-                "duration": _parse_iso8601_duration(item["contentDetails"]["duration"]),
+                "duration": _parse_iso8601_duration(duration_iso),
                 "title": item["snippet"].get("title", ""),
             }
     return details
