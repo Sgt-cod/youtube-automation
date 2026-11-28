@@ -52,6 +52,21 @@ def send_message(text: str) -> int:
     return result["message_id"]
 
 
+def send_photo(path: str, caption: str = "") -> int:
+    """Envia uma imagem para o seu chat (ex: a sugestao de thumbnail)."""
+    with open(path, "rb") as f:
+        resp = requests.post(
+            f"{API}/bot{_token()}/sendPhoto",
+            data={"chat_id": _chat_id(), "caption": caption[:1000]},
+            files={"photo": f},
+            timeout=120,
+        )
+    data = resp.json()
+    if not data.get("ok"):
+        raise RuntimeError(f"Telegram sendPhoto falhou: {data}")
+    return data["result"]["message_id"]
+
+
 def _flush_updates() -> int:
     """Descarta mensagens antigas (ex: uma imagem mandada ontem) e retorna o
     offset a partir do qual vamos ler."""

@@ -4,7 +4,8 @@ download -> transcricao -> escolha do trecho (Gemini + verificacao) ->
 Telegram: contexto do corte + pedido de AUDIO opcional (comentario introdutorio
 que vira uma previa P&B antes da intro) -> pedido da thumbnail -> corte (enquanto
 voce prepara a thumbnail) -> espera a thumbnail -> upload + thumbnail.
-Sem audio/thumbnail: sobe normalmente (thumbnail = frame do proprio video).
+Sem thumbnail sua: usa a SUGESTAO gerada por IA (Agnes AI + texto curto, se o
+secret AGNES_API_KEY existir) ou, na falta dela, um frame do proprio video.
 
 Secrets extras: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
 Variaveis opcionais:
@@ -24,6 +25,7 @@ import cut_long
 import download
 import select_video
 import telegram_bot
+import thumbnail_ai
 import transcribe
 import upload_long
 from allowlist import assert_channel_authorized
@@ -36,6 +38,7 @@ THUMB_WAIT_MINUTES = int(os.environ.get("THUMB_WAIT_MINUTES", 60))
 THUMB_TIMEOUT_ACTION = os.environ.get("THUMB_TIMEOUT_ACTION", "publish").lower()
 THUMB_PATH = "thumbnails/long_thumb.jpg"
 AUTO_THUMB_PATH = "thumbnails/long_thumb_auto.jpg"
+AI_THUMB_PATH = "thumbnails/long_thumb_ai.jpg"
 COMMENT_AUDIO_BASE = "thumbnails/comentario"  # extensao vem do Telegram (.ogg, .mp3...)
 
 
@@ -145,6 +148,33 @@ def _ask_for_comment(ctx: dict, titulo: str, duration: float, moment_url: str):
     return path, offset
 
 
+def _make_ai_thumbnail(ctx: dict, titulo: str) -> dict | None:
+    """Gera a sugestao (Agnes + texto) e mostra no Telegram. Nunca derruba o
+    pipeline: se falhar, avisa e o fallback passa a ser um frame do video."""
+    clip, segs = ctx["clip"], ctx["segments"]
+    s, e = clip.get("start_idx"), clip.get("end_idx")
+    trecho = ""
+    if s is not None and e is not None:
+        trecho = _snippet(" ".join(x["text"] for x in segs[s:min(e, s + 25) + 1]), 900)
+    try:
+        result = thumbnail_ai.build_ai_thumbnail(titulo, clip.get("motivo", ""), trecho, AI_THUMB_PATH)
+        if not result:
+            return None
+        telegram_bot.send_photo(
+            result["path"],
+            f"🤖 Sugestão automática (texto: {result['texto']}). "
+            "É a que vou usar se você não enviar a sua.",
+        )
+        return result
+    except Exception as e:
+        print(f"[AVISO] Thumbnail por IA falhou: {e}")
+        telegram_bot.send_message(
+            f"⚠️ Não consegui gerar a sugestão por IA ({str(e)[:150]}). "
+            "Sem a sua thumbnail, uso um frame do vídeo."
+        )
+        return None
+
+
 def _publish(video_id: str, ctx: dict, publish: bool):
     clip = ctx["clip"]
     titulo = clip.get("titulo") or "Corte do dia"
@@ -152,14 +182,20 @@ def _publish(video_id: str, ctx: dict, publish: bool):
     moment_url = f"{ctx['video_url']}&t={int(clip['start'])}s"
 
     comment_audio, comment_offset = None, 0.0
+    ai_thumb = None
     if publish:
         telegram_bot.start_session()  # ignora mensagens antigas
         comment_audio, comment_offset = _ask_for_comment(ctx, titulo, duration, moment_url)
+        has_ai = bool(os.environ.get("AGNES_API_KEY"))
         telegram_bot.send_message(
             "🖼 Agora me envie a THUMBNAIL (foto ou arquivo de imagem, 16:9 de preferência) "
             f"nos próximos {THUMB_WAIT_MINUTES} min.\n"
-            "Ou responda 'pular' para usar um frame do próprio vídeo."
+            + ("Se não enviar (ou responder 'pular'), uso uma sugestão gerada por IA que "
+               "vou mostrar aqui em instantes."
+               if has_ai else
+               "Ou responda 'pular' para usar um frame do próprio vídeo.")
         )
+        ai_thumb = _make_ai_thumbnail(ctx, titulo) if has_ai else None
 
     print("== 4/5 Cortando (16:9) ==")
     try:
@@ -197,17 +233,19 @@ def _publish(video_id: str, ctx: dict, publish: bool):
     link = f"https://youtu.be/{uploaded_id}"
 
     thumb_file, thumb_note = None, ""
+    why = "Você pediu para pular" if result == "skip" else "⏰ Tempo esgotado"
     if result == "image":
         thumb_file, thumb_note = THUMB_PATH, "Thumbnail personalizada aplicada ✅"
+    elif ai_thumb:
+        thumb_file = ai_thumb["path"]
+        thumb_note = f"{why}; usei a sugestão por IA (\u201c{ai_thumb['texto']}\u201d) 🤖"
     else:
-        # sem thumbnail sua (pular/tempo esgotado): usa um frame do proprio video
+        # sem thumbnail sua e sem IA: usa um frame do proprio video
         try:
             total, _ = cut_long._probe(clip_path)
             cut_long.extract_frame(clip_path, AUTO_THUMB_PATH, total * 0.35)
             thumb_file = AUTO_THUMB_PATH
-            thumb_note = ("Você pediu para pular; usei um frame do vídeo como thumbnail."
-                          if result == "skip" else
-                          "⏰ Tempo esgotado; usei um frame do vídeo como thumbnail.")
+            thumb_note = f"{why}; usei um frame do vídeo como thumbnail."
         except Exception as e:
             thumb_note = f"⚠️ Não consegui gerar o frame da thumbnail ({e})."
 
