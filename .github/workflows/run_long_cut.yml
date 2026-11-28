@@ -75,6 +75,7 @@ jobs:
           YOUTUBE_CREDENTIALS: ${{ secrets.YOUTUBE_CREDENTIALS }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          AGNES_API_KEY: ${{ secrets.AGNES_API_KEY }}
           AUDIO_WAIT_MINUTES: ${{ github.event.inputs.audio_wait_minutes || '15' }}
           THUMB_WAIT_MINUTES: ${{ github.event.inputs.wait_minutes || '60' }}
           VIDEO_ID: ${{ github.event.inputs.video_id }}
@@ -116,4 +117,4 @@ jobs:
           fi
 
 # Secrets novos (Settings > Secrets and variables > Actions):
-# TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+# TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, AGNES_API_KEY (opcional: thumbnail por IA)
